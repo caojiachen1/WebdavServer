@@ -1,7 +1,6 @@
 package com.hqsrawmelon.webdavserver
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,8 +27,10 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 
 data class FileItem(
     val file: File,
@@ -39,7 +40,7 @@ data class FileItem(
     val lastModified: Long = file.lastModified()
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun FileManagerScreen(
     rootDir: File,
@@ -60,21 +61,24 @@ fun FileManagerScreen(
     var isUploading by remember { mutableStateOf(false) }
     var uploadFileName by remember { mutableStateOf("") }
     var isRefreshing by remember { mutableStateOf(false) }
-    var refreshOffset by remember { mutableStateOf(0f) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     
-    // Handle refresh trigger
-    LaunchedEffect(isRefreshing) {
-        if (isRefreshing) {
-            // Add a small delay for better UX
-            kotlinx.coroutines.delay(500)
-            files = loadFiles(currentDirectory)
-            onRefreshTrigger()
-            isRefreshing = false
-            refreshOffset = 0f
+    // Pull refresh state using Material (not Material3)
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = isRefreshing,
+        onRefresh = {
+            scope.launch {
+                isRefreshing = true
+                // Add a small delay to show the spinning animation
+                kotlinx.coroutines.delay(300)
+                onRefreshTrigger()
+                // Keep refreshing state until files are loaded
+                kotlinx.coroutines.delay(500)
+                isRefreshing = false
+            }
         }
-    }
+    )
     
     // File picker launcher
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -119,134 +123,89 @@ fun FileManagerScreen(
     }
     
     LaunchedEffect(currentDirectory, refreshTrigger) {
-        if (!isRefreshing) {
+        if (isRefreshing) {
+            // If currently refreshing, load files and then stop refreshing
+            files = loadFiles(currentDirectory)
+        } else {
             files = loadFiles(currentDirectory)
         }
     }
     
-    // Direct content without Scaffold wrapper
+    // Main content with pull-to-refresh
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .pullRefresh(pullRefreshState)
     ) {
-        // Main content with pull-to-refresh gesture
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .offset { IntOffset(0, refreshOffset.roundToInt()) }
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragEnd = {
-                            if (refreshOffset > 200f && !isRefreshing) {
-                                isRefreshing = true
+        if (files.isEmpty() && !isRefreshing) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    Icons.Default.FolderOpen,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "文件夹为空",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = { showCreateDialog = true }
+                ) {
+                    Icon(Icons.Default.CreateNewFolder, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("创建文件夹")
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(files) { fileItem ->
+                    FileItemCard(
+                        fileItem = fileItem,
+                        onFileClick = { file ->
+                            if (file.isDirectory) {
+                                onDirectoryChange(file.file)
                             } else {
-                                refreshOffset = 0f
-                            }
-                        }
-                    ) { _, dragAmount ->
-                        val newOffset = refreshOffset + dragAmount.y
-                        refreshOffset = if (newOffset > 0f && !isRefreshing) {
-                            (newOffset * 0.5f).coerceAtMost(300f)
-                        } else {
-                            0f
-                        }
-                    }
-                }
-        ) {
-            if (files.isEmpty() && !isRefreshing) {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        Icons.Default.FolderOpen,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "文件夹为空",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        onClick = { showCreateDialog = true }
-                    ) {
-                        Icon(Icons.Default.CreateNewFolder, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("创建文件夹")
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(files) { fileItem ->
-                        FileItemCard(
-                            fileItem = fileItem,
-                            onFileClick = { file ->
-                                if (file.isDirectory) {
-                                    onDirectoryChange(file.file)
-                                } else {
-                                    selectedFile = file
-                                    showDetailsDialog = true
-                                }
-                            },
-                            onFileMenuClick = { file ->
                                 selectedFile = file
-                            },
-                            onRename = { 
-                                showRenameDialog = true 
-                            },
-                            onDelete = { 
-                                showDeleteDialog = true 
-                            },
-                            onDetails = {
                                 showDetailsDialog = true
                             }
-                        )
-                    }
+                        },
+                        onFileMenuClick = { file ->
+                            selectedFile = file
+                        },
+                        onRename = { 
+                            showRenameDialog = true 
+                        },
+                        onDelete = { 
+                            showDeleteDialog = true 
+                        },
+                        onDetails = {
+                            showDetailsDialog = true
+                        }
+                    )
                 }
             }
         }
         
-        // Pull to refresh indicator
-        if (refreshOffset > 0f || isRefreshing) {
-            Card(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(16.dp)
-                    .offset { IntOffset(0, (refreshOffset * 0.3f).roundToInt()) },
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (isRefreshing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = if (refreshOffset > 200f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (isRefreshing) "刷新中..." else if (refreshOffset > 200f) "松手刷新" else "下拉刷新",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-        }
+        // Pull refresh indicator using Material (not Material3)
+        PullRefreshIndicator(
+            refreshing = isRefreshing,
+            state = pullRefreshState,
+            modifier = Modifier.align(Alignment.TopCenter),
+            // Customize the appearance
+            backgroundColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.primary
+        )
         
         // Floating Action Button for Create Folder
         FloatingActionButton(

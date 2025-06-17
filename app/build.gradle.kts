@@ -84,6 +84,9 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     
+    // Use the correct version for Material Compose
+    implementation("androidx.compose.material:material:1.5.4")
+
     // Add Material Icons Extended for more icons
     implementation("androidx.compose.material:material-icons-extended:1.5.4")
     
