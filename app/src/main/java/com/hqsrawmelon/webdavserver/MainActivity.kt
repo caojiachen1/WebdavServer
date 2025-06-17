@@ -54,7 +54,6 @@ import java.lang.reflect.Method
 
 class MainActivity : ComponentActivity() {
     private var webServer: CustomWebDAVServer? = null
-    private val serverPort = 8080
     
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -134,6 +133,9 @@ class MainActivity : ComponentActivity() {
         var serverStatus by remember { mutableStateOf("服务器已停止") }
         var username by remember { mutableStateOf("admin") }
         var password by remember { mutableStateOf("123456") }
+        var serverPort by remember { mutableStateOf(8080) }
+        var allowAnonymous by remember { mutableStateOf(false) }
+        var enableHttps by remember { mutableStateOf(false) }
         
         // File manager state for navigation
         var currentDirectory by remember { mutableStateOf(webdavRootDir) }
@@ -266,7 +268,8 @@ class MainActivity : ComponentActivity() {
                         serverStatus = serverStatus,
                         onServerStatusChange = { serverStatus = it },
                         username = username,
-                        password = password
+                        password = password,
+                        serverPort = serverPort
                     )
                     1 -> FileManagerScreen(
                         rootDir = webdavRootDir,
@@ -281,6 +284,12 @@ class MainActivity : ComponentActivity() {
                         onUsernameChange = { username = it },
                         password = password,
                         onPasswordChange = { password = it },
+                        serverPort = serverPort,
+                        onServerPortChange = { serverPort = it },
+                        allowAnonymous = allowAnonymous,
+                        onAllowAnonymousChange = { allowAnonymous = it },
+                        enableHttps = enableHttps,
+                        onEnableHttpsChange = { enableHttps = it },
                         isServerRunning = isServerRunning
                     )
                 }
@@ -296,7 +305,8 @@ class MainActivity : ComponentActivity() {
         serverStatus: String,
         onServerStatusChange: (String) -> Unit,
         username: String,
-        password: String
+        password: String,
+        serverPort: Int
     ) {
         var ipAddress by remember { mutableStateOf("") }
         val scope = rememberCoroutineScope()
@@ -409,7 +419,7 @@ class MainActivity : ComponentActivity() {
                             onServerRunningChange(false)
                             onServerStatusChange("服务器已停止")
                         } else {
-                            val success = startServer(username, password)
+                            val success = startServer(username, password, serverPort)
                             if (success) {
                                 onServerRunningChange(true)
                                 onServerStatusChange("服务器运行中")
@@ -472,7 +482,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     
-    private suspend fun startServer(username: String, password: String): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun startServer(username: String, password: String, port: Int): Boolean = withContext(Dispatchers.IO) {
         try {
             stopServer() // Stop any existing server
             
@@ -481,7 +491,7 @@ class MainActivity : ComponentActivity() {
                 rootDir.mkdirs()
             }
             
-            webServer = CustomWebDAVServer(serverPort, rootDir, username, password)
+            webServer = CustomWebDAVServer(port, rootDir, username, password)
             webServer?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
             true
         } catch (e: IOException) {
