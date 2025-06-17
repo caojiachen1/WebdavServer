@@ -60,22 +60,31 @@ fun FileManagerScreen(
     var uploadProgress by remember { mutableStateOf(0f) }
     var isUploading by remember { mutableStateOf(false) }
     var uploadFileName by remember { mutableStateOf("") }
-    var isRefreshing by remember { mutableStateOf(false) }
+    // Use key with currentDirectory to reset refresh state for each directory
+    var isRefreshing by remember(currentDirectory) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     
-    // Pull refresh state using Material (not Material3)
+    // Pull refresh state - recreate for each directory using the correct API
     val pullRefreshState = rememberPullRefreshState(
         refreshing = isRefreshing,
         onRefresh = {
             scope.launch {
                 isRefreshing = true
-                // Add a small delay to show the spinning animation
-                kotlinx.coroutines.delay(300)
-                onRefreshTrigger()
-                // Keep refreshing state until files are loaded
-                kotlinx.coroutines.delay(500)
-                isRefreshing = false
+                try {
+                    // Add a small delay to make the refresh animation visible
+                    kotlinx.coroutines.delay(200)
+                    // Reload files for current directory
+                    files = loadFiles(currentDirectory)
+                    // Trigger global refresh
+                    onRefreshTrigger()
+                    // Additional delay to show completion
+                    kotlinx.coroutines.delay(300)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    isRefreshing = false
+                }
             }
         }
     )
@@ -123,12 +132,8 @@ fun FileManagerScreen(
     }
     
     LaunchedEffect(currentDirectory, refreshTrigger) {
-        if (isRefreshing) {
-            // If currently refreshing, load files and then stop refreshing
-            files = loadFiles(currentDirectory)
-        } else {
-            files = loadFiles(currentDirectory)
-        }
+        // Always reload files when directory changes or refresh is triggered
+        files = loadFiles(currentDirectory)
     }
     
     // Main content with pull-to-refresh
@@ -197,14 +202,14 @@ fun FileManagerScreen(
             }
         }
         
-        // Pull refresh indicator using Material (not Material3)
+        // Pull refresh indicator - ensure it's always visible
         PullRefreshIndicator(
             refreshing = isRefreshing,
             state = pullRefreshState,
             modifier = Modifier.align(Alignment.TopCenter),
-            // Customize the appearance
-            backgroundColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.primary
+            backgroundColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            scale = true
         )
         
         // Floating Action Button for Create Folder
