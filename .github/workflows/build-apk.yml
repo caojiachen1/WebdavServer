@@ -1,0 +1,168 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history for tag detection
+      
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      
+    - name: Cache Gradle packages
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+          
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Get latest tag and generate new version
+      id: version
+      run: |
+        # Get the latest release tag from GitHub API
+        if LATEST_RELEASE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.tag_name' 2>/dev/null) && [ "$LATEST_RELEASE" != "null" ]; then
+          LATEST_TAG="$LATEST_RELEASE"
+          echo "Found latest release tag: $LATEST_TAG"
+        else
+          echo "No previous releases found"
+          LATEST_TAG=""
+        fi
+        
+        # Check commit message for version bump indicators
+        COMMIT_MESSAGE="${{ github.event.head_commit.message }}"
+        echo "Processing commit message: $COMMIT_MESSAGE"
+        
+        # Validate commit message is not empty
+        if [ -z "$COMMIT_MESSAGE" ]; then
+          echo "Warning: Empty commit message, treating as patch update"
+          COMMIT_MESSAGE="Update"
+        fi
+        
+        IS_MAJOR_BUMP=$(echo "$COMMIT_MESSAGE" | grep -E "\[major\]|BREAKING CHANGE" || echo "")
+        IS_MINOR_BUMP=$(echo "$COMMIT_MESSAGE" | grep -E "\[minor\]|\[feature\]" || echo "")
+        
+        # Clean commit message by removing version tags
+        CLEAN_COMMIT_MESSAGE=$(echo "$COMMIT_MESSAGE" | sed -E 's/\s*\[(major|minor|feature)\]\s*//g' | sed 's/BREAKING CHANGE:\s*//g' | tr -s ' ')
+        CLEAN_COMMIT_MESSAGE=$(echo "$CLEAN_COMMIT_MESSAGE" | xargs)
+        
+        # Ensure clean commit message is not empty
+        if [ -z "$CLEAN_COMMIT_MESSAGE" ]; then
+          CLEAN_COMMIT_MESSAGE="Update"
+        fi
+        
+        if [ -n "$LATEST_TAG" ]; then
+          # Extract version number
+          VERSION=$(echo "$LATEST_TAG" | sed 's/^v//')
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          
+          # Validate version parts
+          if ! [[ "$MAJOR" =~ ^[0-9]+$ ]]; then MAJOR=0; fi
+          if ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then MINOR=0; fi
+          
+          if [ -n "$IS_MAJOR_BUMP" ]; then
+            # Major version bump (e.g., v0.3 -> v1.0)
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            NEW_VERSION="v$MAJOR.$MINOR"
+            echo "major_update=true" >> $GITHUB_OUTPUT
+          else
+            # Regular increment by 1 in minor version
+            MINOR=$((MINOR + 1))
+            NEW_VERSION="v$MAJOR.$MINOR"
+            if [ -n "$IS_MINOR_BUMP" ]; then
+              echo "minor_update=true" >> $GITHUB_OUTPUT
+            else
+              echo "patch_update=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+        else
+          # No previous releases, start with v0.1
+          NEW_VERSION="v0.1"
+          echo "initial_release=true" >> $GITHUB_OUTPUT
+        fi
+        
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "previous_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+        echo "clean_commit_message=$CLEAN_COMMIT_MESSAGE" >> $GITHUB_OUTPUT
+        echo "New version will be: $NEW_VERSION"
+        if [ -n "$IS_MAJOR_BUMP" ]; then 
+          echo "This is a MAJOR version update!"
+        elif [ -n "$IS_MINOR_BUMP" ]; then 
+          echo "This is a MINOR version update!"
+        else 
+          echo "This is a regular patch update."
+        fi
+      
+    - name: Build Release APK
+      run: ./gradlew assembleRelease
+
+    - name: Rename APK files
+      run: |
+        # Find and rename release APK file with version
+        RELEASE_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+        
+        if [ -n "$RELEASE_APK" ]; then
+          RELEASE_NEW_NAME="WebdavServer-${{ steps.version.outputs.new_version }}-release.apk"
+          cp "$RELEASE_APK" "$RELEASE_NEW_NAME"
+          echo "RELEASE_APK_PATH=$RELEASE_NEW_NAME" >> $GITHUB_ENV
+        fi
+        
+    - name: Upload Release APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-apk-${{ steps.version.outputs.new_version }}
+        path: ${{ env.RELEASE_APK_PATH }}
+
+    - name: Create Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version.outputs.new_version }}
+        release_name: WebdavServer ${{ steps.version.outputs.new_version }}
+        body: |
+          ## Changes in this release
+          ${{ steps.version.outputs.clean_commit_message }}
+
+          ## Download Options
+          - `WebdavServer-${{ steps.version.outputs.new_version }}-release.apk` - Production ready APK
+        draft: false
+        prerelease: false
+
+    - name: Upload Release APK to Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ env.RELEASE_APK_PATH }}
+        asset_name: WebdavServer-${{ steps.version.outputs.new_version }}-release.apk
+        asset_content_type: application/vnd.android.package-archive
