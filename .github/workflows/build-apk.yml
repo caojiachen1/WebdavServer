@@ -16,11 +16,11 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0  # Fetch full history for tag detection
-      
-    - name: Set up JDK 17
+        
+    - name: Set up JDK 8
       uses: actions/setup-java@v4
       with:
-        java-version: '17'
+        java-version: '8'
         distribution: 'temurin'
         
     - name: Setup Android SDK
@@ -41,8 +41,50 @@ jobs:
 
     - name: Setup Keystore
       run: |
+        echo "Setting up keystore..."
+        
+        # Check if the secret exists and is not empty
+        if [ -z "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" ]; then
+          echo "Error: SIGNING_KEYSTORE_BASE64 secret is not set or empty"
+          exit 1
+        fi
+        
+        # Decode base64 keystore with better error handling
         echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
-        echo "KEYSTORE_PATH=$(pwd)/keystore.jks" >> $GITHUB_ENV
+        
+        # Verify the keystore file was created and has content
+        if [ ! -f "keystore.jks" ]; then
+          echo "Error: Keystore file was not created"
+          exit 1
+        fi
+        
+        # Check if keystore file has content
+        if [ ! -s "keystore.jks" ]; then
+          echo "Error: Keystore file is empty"
+          exit 1
+        fi
+        
+        # Set file permissions
+        chmod 600 keystore.jks
+        
+        # Get absolute path
+        KEYSTORE_ABSOLUTE_PATH=$(realpath keystore.jks)
+        echo "KEYSTORE_PATH=$KEYSTORE_ABSOLUTE_PATH" >> $GITHUB_ENV
+        
+        # Verify keystore can be read (optional test - comment out if causing issues)
+        echo "Verifying keystore integrity..."
+        if command -v keytool >/dev/null 2>&1; then
+          # Test keystore without exposing sensitive info
+          if ! keytool -list -keystore "$KEYSTORE_ABSOLUTE_PATH" -storepass "${{ secrets.SIGNING_KEYSTORE_PASSWORD }}" -v >/dev/null 2>&1; then
+            echo "Warning: Keystore verification failed, but continuing build..."
+          else
+            echo "Keystore verification successful"
+          fi
+        else
+          echo "keytool not available, skipping verification"
+        fi
+        
+        echo "Keystore setup completed at: $KEYSTORE_ABSOLUTE_PATH"
 
     - name: Get latest tag and generate new version
       id: version
@@ -155,7 +197,7 @@ jobs:
         rm -f /tmp/latest_release.json
       
     - name: Build Release APK
-      run: ./gradlew assembleRelease
+      run: ./gradlew assembleRelease --stacktrace
       env:
         SIGNING_KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
         SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
