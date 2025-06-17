@@ -42,14 +42,33 @@ jobs:
     - name: Get latest tag and generate new version
       id: version
       run: |
-        # Get the latest release tag from GitHub API
-        if LATEST_RELEASE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-          "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.tag_name' 2>/dev/null) && [ "$LATEST_RELEASE" != "null" ]; then
-          LATEST_TAG="$LATEST_RELEASE"
-          echo "Found latest release tag: $LATEST_TAG"
+        # Get the latest release tag from GitHub API with better error handling
+        echo "Attempting to get latest release from GitHub API..."
+        
+        LATEST_TAG=""
+        if curl -s -f -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          "https://api.github.com/repos/${{ github.repository }}/releases/latest" > /tmp/latest_release.json 2>/dev/null; then
+          
+          # Check if the response contains valid JSON and extract tag_name
+          if LATEST_RELEASE=$(jq -r '.tag_name // empty' /tmp/latest_release.json 2>/dev/null) && [ -n "$LATEST_RELEASE" ] && [ "$LATEST_RELEASE" != "null" ]; then
+            LATEST_TAG="$LATEST_RELEASE"
+            echo "Found latest release tag: $LATEST_TAG"
+          else
+            echo "No valid tag found in API response or response is null"
+          fi
         else
-          echo "No previous releases found"
-          LATEST_TAG=""
+          echo "GitHub API call failed or no releases found"
+        fi
+        
+        # Fallback: try to get latest tag from git
+        if [ -z "$LATEST_TAG" ]; then
+          echo "Attempting fallback: checking git tags..."
+          if GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null) && [ -n "$GIT_TAG" ]; then
+            LATEST_TAG="$GIT_TAG"
+            echo "Found latest git tag: $LATEST_TAG"
+          else
+            echo "No git tags found either"
+          fi
         fi
         
         # Check commit message for version bump indicators
@@ -81,8 +100,16 @@ jobs:
           MINOR=$(echo "$VERSION" | cut -d. -f2)
           
           # Validate version parts
-          if ! [[ "$MAJOR" =~ ^[0-9]+$ ]]; then MAJOR=0; fi
-          if ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then MINOR=0; fi
+          if ! [[ "$MAJOR" =~ ^[0-9]+$ ]]; then 
+            echo "Warning: Invalid major version '$MAJOR', defaulting to 0"
+            MAJOR=0
+          fi
+          if ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then 
+            echo "Warning: Invalid minor version '$MINOR', defaulting to 0"
+            MINOR=0
+          fi
+          
+          echo "Current version: v$MAJOR.$MINOR"
           
           if [ -n "$IS_MAJOR_BUMP" ]; then
             # Major version bump (e.g., v0.3 -> v1.0)
@@ -104,6 +131,7 @@ jobs:
           # No previous releases, start with v0.1
           NEW_VERSION="v0.1"
           echo "initial_release=true" >> $GITHUB_OUTPUT
+          echo "Starting with initial version"
         fi
         
         echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
@@ -117,6 +145,9 @@ jobs:
         else 
           echo "This is a regular patch update."
         fi
+        
+        # Clean up temporary file
+        rm -f /tmp/latest_release.json
       
     - name: Build Release APK
       run: ./gradlew assembleRelease
@@ -126,10 +157,14 @@ jobs:
         # Find and rename release APK file with version
         RELEASE_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
         
-        if [ -n "$RELEASE_APK" ]; then
+        if [ -n "$RELEASE_APK" ] && [ -f "$RELEASE_APK" ]; then
           RELEASE_NEW_NAME="WebdavServer-${{ steps.version.outputs.new_version }}-release.apk"
           cp "$RELEASE_APK" "$RELEASE_NEW_NAME"
           echo "RELEASE_APK_PATH=$RELEASE_NEW_NAME" >> $GITHUB_ENV
+          echo "APK renamed to: $RELEASE_NEW_NAME"
+        else
+          echo "Error: Could not find release APK file"
+          exit 1
         fi
         
     - name: Upload Release APK
@@ -146,7 +181,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.version.outputs.new_version }}
-        release_name: WebdavServer ${{ steps.version.outputs.new_version }}
+        release_name: ${{ steps.version.outputs.new_version }}
         body: |
           ## Changes in this release
           ${{ steps.version.outputs.clean_commit_message }}
