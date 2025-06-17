@@ -54,16 +54,42 @@ import java.lang.reflect.Method
 
 class MainActivity : ComponentActivity() {
     private var webServer: CustomWebDAVServer? = null
+    private lateinit var settingsManager: SettingsManager
+    private lateinit var networkDiagnostics: NetworkDiagnostics
     
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        // Handle permission results if needed
+    ) { permissions ->
+        // Handle permission results
+        val locationPermissionGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || 
+                                      permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        
+        if (locationPermissionGranted) {
+            // Refresh network status if location permission was granted
+            // This will be handled in the UI
+        }
+    }
+    
+    // Add location permission launcher
+    private val requestLocationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val locationPermissionGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || 
+                                      permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        
+        if (!locationPermissionGranted) {
+            // Show explanation why location permission is needed
+            // This will be handled in the UI with a snackbar or dialog
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // Initialize managers
+        settingsManager = SettingsManager(this)
+        networkDiagnostics = NetworkDiagnostics(this)
         
         // Configure status bar to follow system theme with MIUI support
         configureStatusBar()
@@ -111,13 +137,19 @@ class MainActivity : ComponentActivity() {
     }
     
     private fun requestPermissions() {
-        val permissions = arrayOf(
-            Manifest.permission.READ_EXTERNAL_STORAGE,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE,
-            Manifest.permission.INTERNET,
-            Manifest.permission.ACCESS_NETWORK_STATE,
-            Manifest.permission.ACCESS_WIFI_STATE
-        )
+        val permissions = mutableListOf<String>().apply {
+            add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            add(Manifest.permission.INTERNET)
+            add(Manifest.permission.ACCESS_NETWORK_STATE)
+            add(Manifest.permission.ACCESS_WIFI_STATE)
+            
+            // Add location permissions for WiFi SSID access on Android 6+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            }
+        }.toTypedArray()
         
         requestPermissionLauncher.launch(permissions)
     }
@@ -131,11 +163,13 @@ class MainActivity : ComponentActivity() {
         // Move server state to this level to persist across tab switches
         var isServerRunning by remember { mutableStateOf(false) }
         var serverStatus by remember { mutableStateOf("服务器已停止") }
-        var username by remember { mutableStateOf("admin") }
-        var password by remember { mutableStateOf("123456") }
-        var serverPort by remember { mutableStateOf(8080) }
-        var allowAnonymous by remember { mutableStateOf(false) }
-        var enableHttps by remember { mutableStateOf(false) }
+        
+        // Collect settings from SettingsManager
+        val username by settingsManager.username.collectAsState()
+        val password by settingsManager.password.collectAsState()
+        val serverPort by settingsManager.serverPort.collectAsState()
+        val allowAnonymous by settingsManager.allowAnonymous.collectAsState()
+        val enableHttps by settingsManager.enableHttps.collectAsState()
         
         // File manager state for navigation
         var currentDirectory by remember { mutableStateOf(webdavRootDir) }
@@ -269,7 +303,8 @@ class MainActivity : ComponentActivity() {
                         onServerStatusChange = { serverStatus = it },
                         username = username,
                         password = password,
-                        serverPort = serverPort
+                        serverPort = serverPort,
+                        allowAnonymous = allowAnonymous
                     )
                     1 -> FileManagerScreen(
                         rootDir = webdavRootDir,
@@ -280,17 +315,17 @@ class MainActivity : ComponentActivity() {
                         onUploadFile = { filePickerLauncher.launch("*/*") }
                     )
                     2 -> SettingsScreen(
-                        username = username,
-                        onUsernameChange = { username = it },
-                        password = password,
-                        onPasswordChange = { password = it },
-                        serverPort = serverPort,
-                        onServerPortChange = { serverPort = it },
-                        allowAnonymous = allowAnonymous,
-                        onAllowAnonymousChange = { allowAnonymous = it },
-                        enableHttps = enableHttps,
-                        onEnableHttpsChange = { enableHttps = it },
-                        isServerRunning = isServerRunning
+                        settingsManager = settingsManager,
+                        networkDiagnostics = networkDiagnostics,
+                        isServerRunning = isServerRunning,
+                        onRequestLocationPermission = {
+                            requestLocationPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
+                        }
                     )
                 }
             }
@@ -306,7 +341,8 @@ class MainActivity : ComponentActivity() {
         onServerStatusChange: (String) -> Unit,
         username: String,
         password: String,
-        serverPort: Int
+        serverPort: Int,
+        allowAnonymous: Boolean
     ) {
         var ipAddress by remember { mutableStateOf("") }
         val scope = rememberCoroutineScope()
@@ -400,7 +436,10 @@ class MainActivity : ComponentActivity() {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 
                                 Text(
-                                    text = "用户名: $username",
+                                    text = if (allowAnonymous) 
+                                        "访问模式: 匿名访问" 
+                                    else 
+                                        "用户名: $username",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
@@ -419,7 +458,7 @@ class MainActivity : ComponentActivity() {
                             onServerRunningChange(false)
                             onServerStatusChange("服务器已停止")
                         } else {
-                            val success = startServer(username, password, serverPort)
+                            val success = startServer(username, password, serverPort, allowAnonymous)
                             if (success) {
                                 onServerRunningChange(true)
                                 onServerStatusChange("服务器运行中")
@@ -482,7 +521,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     
-    private suspend fun startServer(username: String, password: String, port: Int): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun startServer(username: String, password: String, port: Int, allowAnonymous: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         try {
             stopServer() // Stop any existing server
             
@@ -491,7 +530,14 @@ class MainActivity : ComponentActivity() {
                 rootDir.mkdirs()
             }
             
-            webServer = CustomWebDAVServer(port, rootDir, username, password)
+            webServer = CustomWebDAVServer(
+                port = port, 
+                rootDir = rootDir, 
+                username = username, 
+                password = password,
+                allowAnonymous = allowAnonymous,
+                settingsManager = settingsManager
+            )
             webServer?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
             true
         } catch (e: IOException) {
@@ -546,7 +592,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-class CustomWebDAVServer(port: Int, private val rootDir: File, private val username: String, private val password: String) : NanoHTTPD(port) {
+class CustomWebDAVServer(
+    port: Int, 
+    private val rootDir: File, 
+    private val username: String, 
+    private val password: String,
+    private val allowAnonymous: Boolean = false,
+    private val settingsManager: SettingsManager? = null
+) : NanoHTTPD(port) {
     
     override fun serve(session: IHTTPSession): Response {
         val method = session.method
@@ -554,7 +607,7 @@ class CustomWebDAVServer(port: Int, private val rootDir: File, private val usern
         val headers = session.headers
         
         // Check authentication for all methods except OPTIONS
-        if (method != Method.OPTIONS && !isAuthenticated(headers)) {
+        if (method != Method.OPTIONS && !allowAnonymous && !isAuthenticated(headers)) {
             val response = newFixedLengthResponse(Response.Status.UNAUTHORIZED, "text/plain", "Authentication required")
             response.addHeader("WWW-Authenticate", "Basic realm=\"WebDAV Server\"")
             return response
