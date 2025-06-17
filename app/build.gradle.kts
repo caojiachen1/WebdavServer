@@ -20,17 +20,16 @@ android {
 
     signingConfigs {
         create("release") {
-            // 生产环境需要使用自己的签名文件
-            // storeFile = file("release.keystore")
-            // storePassword = "your_store_password"
-            // keyAlias = "your_key_alias"
-            // keyPassword = "your_key_password"
+            // 使用环境变量的签名配置，适配 CI/CD 和本地开发
+            val keystorePath = System.getenv("SIGNING_KEYSTORE_PATH")
+            val keystorePassword = System.getenv("SIGNING_KEYSTORE_PASSWORD")
+            val keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+            val keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
             
-            // 临时使用debug签名（仅用于测试）
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            storeFile = file(keystorePath)
+            storePassword = keystorePassword
+            this.keyAlias = keyAlias
+            this.keyPassword = keyPassword
         }
     }
 
