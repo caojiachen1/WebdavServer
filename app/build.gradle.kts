@@ -27,6 +27,7 @@ android {
             val keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
             
             storeFile = file(keystorePath)
+            keyStoreType = "PKCS12"
             storePassword = keystorePassword
             this.keyAlias = keyAlias
             this.keyPassword = keyPassword
