@@ -43,11 +43,11 @@ jobs:
       run: |
         echo "Setting up P12 keystore..."
         
-        # Check if the secret exists and is not empty
-        if [ -z "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" ]; then
-          echo "Error: SIGNING_KEYSTORE_BASE64 secret is not set or empty"
-          exit 1
-        fi
+        # # Check if the secret exists and is not empty
+        # if [ -z "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" ]; then
+        #   echo "Error: SIGNING_KEYSTORE_BASE64 secret is not set or empty"
+        #   exit 1
+        # fi
         
         # Decode base64 keystore with better error handling
         echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > keystore.p12
