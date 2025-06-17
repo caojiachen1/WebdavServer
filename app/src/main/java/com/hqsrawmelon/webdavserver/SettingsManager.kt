@@ -66,15 +66,24 @@ class SettingsManager(context: Context) {
     private val _maxLogSize = MutableStateFlow(prefs.getInt("max_log_size", 10))
     val maxLogSize: StateFlow<Int> = _maxLogSize.asStateFlow()
     
+    private val logManager = LogManager(context)
+    
     // Update methods
     fun updateUsername(value: String) {
         _username.value = value
         prefs.edit().putString("username", value).apply()
+        // Log settings change if logging is enabled
+        if (_enableLogging.value) {
+            logManager.logInfo("Settings", "Username updated")
+        }
     }
     
     fun updatePassword(value: String) {
         _password.value = value
         prefs.edit().putString("password", value).apply()
+        if (_enableLogging.value) {
+            logManager.logInfo("Settings", "Password updated")
+        }
     }
     
     fun updateAllowAnonymous(value: Boolean) {
@@ -85,6 +94,9 @@ class SettingsManager(context: Context) {
     fun updateServerPort(value: Int) {
         _serverPort.value = value
         prefs.edit().putInt("server_port", value).apply()
+        if (_enableLogging.value) {
+            logManager.logInfo("Settings", "Server port updated to $value")
+        }
     }
     
     fun updateEnableHttps(value: Boolean) {
@@ -208,6 +220,10 @@ class SettingsManager(context: Context) {
     }
     
     fun resetToDefaults() {
+        if (_enableLogging.value) {
+            logManager.logInfo("Settings", "Resetting all settings to defaults")
+        }
+        
         prefs.edit().clear().apply()
         
         _username.value = "admin"

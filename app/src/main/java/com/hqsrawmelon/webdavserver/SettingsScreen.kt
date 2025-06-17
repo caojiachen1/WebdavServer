@@ -71,8 +71,22 @@ fun SettingsScreen(
     var importText by remember { mutableStateOf("") }
     var exportText by remember { mutableStateOf("") }
     
+    // Add LogManager and snackbar state
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val logManager = remember { LogManager(context) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    
+    // Log viewing state
+    var showLogDialog by remember { mutableStateOf(false) }
+    var logContent by remember { mutableStateOf("") }
+    var isLoadingLogs by remember { mutableStateOf(false) }
+    var logSize by remember { mutableStateOf("0B") }
+    
+    // Load log size on composition
+    LaunchedEffect(Unit) {
+        logSize = logManager.getLogSize()
+    }
     
     // File picker for import/export
     val exportLauncher = rememberLauncherForActivityResult(
@@ -742,7 +756,15 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 OutlinedButton(
-                                    onClick = { /* Open logs */ },
+                                    onClick = { 
+                                        showLogDialog = true
+                                        isLoadingLogs = true
+                                        scope.launch {
+                                            logContent = logManager.readLogs()
+                                            logSize = logManager.getLogSize()
+                                            isLoadingLogs = false
+                                        }
+                                    },
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Icon(Icons.Default.Visibility, contentDescription = null)
@@ -750,7 +772,17 @@ fun SettingsScreen(
                                     Text("查看日志")
                                 }
                                 OutlinedButton(
-                                    onClick = { /* Clear logs */ },
+                                    onClick = { 
+                                        scope.launch {
+                                            try {
+                                                logManager.clearLogs()
+                                                logSize = logManager.getLogSize()
+                                                snackbarHostState.showSnackbar("日志已清空")
+                                            } catch (e: Exception) {
+                                                snackbarHostState.showSnackbar("清空日志失败: ${e.message}")
+                                            }
+                                        }
+                                    },
                                     modifier = Modifier.weight(1f),
                                     colors = ButtonDefaults.outlinedButtonColors(
                                         contentColor = MaterialTheme.colorScheme.error
@@ -761,6 +793,15 @@ fun SettingsScreen(
                                     Text("清空日志")
                                 }
                             }
+                            
+                            // Add log size info
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Text(
+                                text = "当前日志大小: $logSize",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -1174,6 +1215,105 @@ fun SettingsScreen(
                     Text("取消")
                 }
             }
+        )
+    }
+    
+    // Log viewing dialog
+    if (showLogDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogDialog = false },
+            title = { 
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("服务器日志")
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = logSize,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            text = {
+                if (isLoadingLogs) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp)
+                    ) {
+                        item {
+                            Text(
+                                text = logContent,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                try {
+                                    // Share log content
+                                    val intent = android.content.Intent().apply {
+                                        action = android.content.Intent.ACTION_SEND
+                                        type = "text/plain"
+                                        putExtra(android.content.Intent.EXTRA_TEXT, logContent)
+                                        putExtra(android.content.Intent.EXTRA_SUBJECT, "WebDAV服务器日志")
+                                    }
+                                    context.startActivity(
+                                        android.content.Intent.createChooser(intent, "分享日志")
+                                    )
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar("分享失败: ${e.message}")
+                                }
+                            }
+                        }
+                    ) {
+                        Text("分享")
+                    }
+                    TextButton(
+                        onClick = {
+                            isLoadingLogs = true
+                            scope.launch {
+                                logContent = logManager.readLogs()
+                                logSize = logManager.getLogSize()
+                                isLoadingLogs = false
+                            }
+                        }
+                    ) {
+                        Text("刷新")
+                    }
+                    TextButton(onClick = { showLogDialog = false }) {
+                        Text("关闭")
+                    }
+                }
+            }
+        )
+    }
+    
+    // Add SnackbarHost
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Your existing LazyColumn content here
+        
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
         )
     }
 }
