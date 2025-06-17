@@ -1,6 +1,7 @@
 package com.hqsrawmelon.webdavserver
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,6 +27,9 @@ import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.roundToInt
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
 
 data class FileItem(
     val file: File,
@@ -37,8 +41,14 @@ data class FileItem(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FileManagerScreen(rootDir: File) {
-    var currentDirectory by remember { mutableStateOf(rootDir) }
+fun FileManagerScreen(
+    rootDir: File,
+    currentDirectory: File,
+    onDirectoryChange: (File) -> Unit,
+    refreshTrigger: Int,
+    onRefreshTrigger: () -> Unit,
+    onUploadFile: () -> Unit = {}
+) {
     var files by remember { mutableStateOf(listOf<FileItem>()) }
     var selectedFile by remember { mutableStateOf<FileItem?>(null) }
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -49,9 +59,22 @@ fun FileManagerScreen(rootDir: File) {
     var uploadProgress by remember { mutableStateOf(0f) }
     var isUploading by remember { mutableStateOf(false) }
     var uploadFileName by remember { mutableStateOf("") }
-    var refreshTrigger by remember { mutableStateOf(0) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var refreshOffset by remember { mutableStateOf(0f) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    
+    // Handle refresh trigger
+    LaunchedEffect(isRefreshing) {
+        if (isRefreshing) {
+            // Add a small delay for better UX
+            kotlinx.coroutines.delay(500)
+            files = loadFiles(currentDirectory)
+            onRefreshTrigger()
+            isRefreshing = false
+            refreshOffset = 0f
+        }
+    }
     
     // File picker launcher
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -81,7 +104,7 @@ fun FileManagerScreen(rootDir: File) {
                     }
                     
                     if (success) {
-                        refreshTrigger++
+                        onRefreshTrigger()
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -96,50 +119,40 @@ fun FileManagerScreen(rootDir: File) {
     }
     
     LaunchedEffect(currentDirectory, refreshTrigger) {
-        files = loadFiles(currentDirectory)
+        if (!isRefreshing) {
+            files = loadFiles(currentDirectory)
+        }
     }
     
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { 
-                    Text(
-                        "文件管理 - ${currentDirectory.name}",
-                        fontWeight = FontWeight.Bold
-                    ) 
-                },
-                navigationIcon = {
-                    if (currentDirectory != rootDir) {
-                        IconButton(onClick = { 
-                            currentDirectory = currentDirectory.parentFile ?: rootDir
-                        }) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = "返回上级")
-                        }
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { filePickerLauncher.launch("*/*") },
-                        enabled = !isUploading
-                    ) {
-                        Icon(Icons.Default.CloudUpload, contentDescription = "上传文件")
-                    }
-                    IconButton(onClick = { showCreateDialog = true }) {
-                        Icon(Icons.Default.CreateNewFolder, contentDescription = "新建文件夹")
-                    }
-                    IconButton(onClick = { refreshTrigger++ }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "刷新")
-                    }
-                }
-            )
-        }
-    ) { innerPadding ->
+    // Direct content without Scaffold wrapper
+    Box(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // Main content with pull-to-refresh gesture
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .offset { IntOffset(0, refreshOffset.roundToInt()) }
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragEnd = {
+                            if (refreshOffset > 200f && !isRefreshing) {
+                                isRefreshing = true
+                            } else {
+                                refreshOffset = 0f
+                            }
+                        }
+                    ) { _, dragAmount ->
+                        val newOffset = refreshOffset + dragAmount.y
+                        refreshOffset = if (newOffset > 0f && !isRefreshing) {
+                            (newOffset * 0.5f).coerceAtMost(300f)
+                        } else {
+                            0f
+                        }
+                    }
+                }
         ) {
-            if (files.isEmpty()) {
+            if (files.isEmpty() && !isRefreshing) {
                 Column(
                     modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -156,6 +169,14 @@ fun FileManagerScreen(rootDir: File) {
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { showCreateDialog = true }
+                    ) {
+                        Icon(Icons.Default.CreateNewFolder, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("创建文件夹")
+                    }
                 }
             } else {
                 LazyColumn(
@@ -168,7 +189,7 @@ fun FileManagerScreen(rootDir: File) {
                             fileItem = fileItem,
                             onFileClick = { file ->
                                 if (file.isDirectory) {
-                                    currentDirectory = file.file
+                                    onDirectoryChange(file.file)
                                 } else {
                                     selectedFile = file
                                     showDetailsDialog = true
@@ -191,6 +212,51 @@ fun FileManagerScreen(rootDir: File) {
                 }
             }
         }
+        
+        // Pull to refresh indicator
+        if (refreshOffset > 0f || isRefreshing) {
+            Card(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(16.dp)
+                    .offset { IntOffset(0, (refreshOffset * 0.3f).roundToInt()) },
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isRefreshing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (refreshOffset > 200f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isRefreshing) "刷新中..." else if (refreshOffset > 200f) "松手刷新" else "下拉刷新",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+        
+        // Floating Action Button for Create Folder
+        FloatingActionButton(
+            onClick = { showCreateDialog = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+        ) {
+            Icon(Icons.Default.CreateNewFolder, contentDescription = "创建文件夹")
+        }
     }
     
     // Dialogs
@@ -200,7 +266,7 @@ fun FileManagerScreen(rootDir: File) {
             onConfirm = { folderName ->
                 scope.launch {
                     createFolder(currentDirectory, folderName)
-                    refreshTrigger++
+                    onRefreshTrigger()
                     showCreateDialog = false
                 }
             }
@@ -214,7 +280,7 @@ fun FileManagerScreen(rootDir: File) {
             onConfirm = { newName ->
                 scope.launch {
                     renameFile(selectedFile!!.file, newName)
-                    refreshTrigger++
+                    onRefreshTrigger()
                     showRenameDialog = false
                     selectedFile = null
                 }
@@ -229,7 +295,7 @@ fun FileManagerScreen(rootDir: File) {
             onConfirm = {
                 scope.launch {
                     deleteFile(selectedFile!!.file)
-                    refreshTrigger++
+                    onRefreshTrigger()
                     showDeleteDialog = false
                     selectedFile = null
                 }

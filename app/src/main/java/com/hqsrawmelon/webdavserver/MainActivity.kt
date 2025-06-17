@@ -14,12 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -28,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -133,6 +129,46 @@ class MainActivity : ComponentActivity() {
         var selectedTab by remember { mutableStateOf(0) }
         val webdavRootDir = remember { File(getExternalFilesDir(null), "webdav") }
         
+        // Move server state to this level to persist across tab switches
+        var isServerRunning by remember { mutableStateOf(false) }
+        var serverStatus by remember { mutableStateOf("服务器已停止") }
+        var username by remember { mutableStateOf("admin") }
+        var password by remember { mutableStateOf("123456") }
+        
+        // File manager state for navigation
+        var currentDirectory by remember { mutableStateOf(webdavRootDir) }
+        var refreshTrigger by remember { mutableStateOf(0) }
+        val scope = rememberCoroutineScope()
+        val context = LocalContext.current
+        
+        // File picker launcher for file manager
+        val filePickerLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent()
+        ) { uri ->
+            uri?.let { selectedUri ->
+                scope.launch {
+                    try {
+                        // Copy file to current directory
+                        val fileName = context.contentResolver.query(selectedUri, null, null, null, null)?.use { cursor ->
+                            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            cursor.moveToFirst()
+                            cursor.getString(nameIndex)
+                        } ?: "uploaded_file"
+                        
+                        val success = withContext(Dispatchers.IO) {
+                            copyFileFromUri(context, selectedUri, currentDirectory, fileName) { _ -> }
+                        }
+                        
+                        if (success) {
+                            refreshTrigger++
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        }
+        
         LaunchedEffect(Unit) {
             if (!webdavRootDir.exists()) {
                 webdavRootDir.mkdirs()
@@ -142,11 +178,49 @@ class MainActivity : ComponentActivity() {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             topBar = {
-                if (selectedTab == 0) {
-                    TopAppBar(
+                when (selectedTab) {
+                    0 -> TopAppBar(
                         title = { 
                             Text(
                                 "WebDAV 服务器",
+                                fontWeight = FontWeight.Bold
+                            ) 
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    )
+                    1 -> TopAppBar(
+                        title = { 
+                            Text(
+                                "文件管理 - ${currentDirectory.name}",
+                                fontWeight = FontWeight.Bold
+                            ) 
+                        },
+                        navigationIcon = {
+                            if (currentDirectory != webdavRootDir) {
+                                IconButton(onClick = { 
+                                    currentDirectory = currentDirectory.parentFile ?: webdavRootDir
+                                }) {
+                                    Icon(Icons.Filled.ArrowBack, contentDescription = "返回上级")
+                                }
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { filePickerLauncher.launch("*/*") }) {
+                                Icon(Icons.Default.CloudUpload, contentDescription = "上传文件")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    )
+                    2 -> TopAppBar(
+                        title = { 
+                            Text(
+                                "设置",
                                 fontWeight = FontWeight.Bold
                             ) 
                         },
@@ -162,7 +236,7 @@ class MainActivity : ComponentActivity() {
                     NavigationBarItem(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                        icon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
                         label = { Text("服务器") }
                     )
                     NavigationBarItem(
@@ -170,6 +244,12 @@ class MainActivity : ComponentActivity() {
                         onClick = { selectedTab = 1 },
                         icon = { Icon(Icons.Default.Folder, contentDescription = null) },
                         label = { Text("文件管理") }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                        label = { Text("设置") }
                     )
                 }
             }
@@ -180,8 +260,29 @@ class MainActivity : ComponentActivity() {
                     .padding(innerPadding)
             ) {
                 when (selectedTab) {
-                    0 -> WebDAVServerApp()
-                    1 -> FileManagerScreen(webdavRootDir)
+                    0 -> WebDAVServerApp(
+                        isServerRunning = isServerRunning,
+                        onServerRunningChange = { isServerRunning = it },
+                        serverStatus = serverStatus,
+                        onServerStatusChange = { serverStatus = it },
+                        username = username,
+                        password = password
+                    )
+                    1 -> FileManagerScreen(
+                        rootDir = webdavRootDir,
+                        currentDirectory = currentDirectory,
+                        onDirectoryChange = { currentDirectory = it },
+                        refreshTrigger = refreshTrigger,
+                        onRefreshTrigger = { refreshTrigger++ },
+                        onUploadFile = { filePickerLauncher.launch("*/*") }
+                    )
+                    2 -> SettingsScreen(
+                        username = username,
+                        onUsernameChange = { username = it },
+                        password = password,
+                        onPasswordChange = { password = it },
+                        isServerRunning = isServerRunning
+                    )
                 }
             }
         }
@@ -189,14 +290,15 @@ class MainActivity : ComponentActivity() {
     
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    fun WebDAVServerApp() {
-        var isServerRunning by remember { mutableStateOf(false) }
-        var serverStatus by remember { mutableStateOf("服务器已停止") }
+    fun WebDAVServerApp(
+        isServerRunning: Boolean,
+        onServerRunningChange: (Boolean) -> Unit,
+        serverStatus: String,
+        onServerStatusChange: (String) -> Unit,
+        username: String,
+        password: String
+    ) {
         var ipAddress by remember { mutableStateOf("") }
-        var username by remember { mutableStateOf("admin") }
-        var password by remember { mutableStateOf("123456") }
-        var passwordVisible by remember { mutableStateOf(false) }
-        val context = LocalContext.current
         val scope = rememberCoroutineScope()
         
         LaunchedEffect(Unit) {
@@ -210,158 +312,161 @@ class MainActivity : ComponentActivity() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            // Authentication Settings Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp)
-                ) {
-                    Text(
-                        text = "认证设置",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = { username = it },
-                        label = { Text("用户名") },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isServerRunning,
-                        singleLine = true
-                    )
-                    
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        label = { Text("密码") },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isServerRunning,
-                        singleLine = true,
-                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        trailingIcon = {
-                            val image = if (passwordVisible)
-                                Icons.Filled.Visibility
-                            else Icons.Filled.VisibilityOff
-
-                            IconButton(onClick = {passwordVisible = !passwordVisible}){
-                                Icon(imageVector = image, contentDescription = null)
-                            }
-                        }
-                    )
-                }
-            }
-
             // Server Status Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    // Status Icon
+                    Icon(
+                        imageVector = if (isServerRunning) Icons.Default.CheckCircleOutline else Icons.Default.Stop,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = if (isServerRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
                     Text(
                         text = "服务器状态",
                         style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
+                    
                     Spacer(modifier = Modifier.height(8.dp))
+                    
                     Text(
                         text = serverStatus,
                         style = MaterialTheme.typography.bodyLarge,
-                        color = if (isServerRunning) Color.Green else Color.Red
+                        color = if (isServerRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                     
                     if (isServerRunning && ipAddress.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(20.dp))
+                        
+                        HorizontalDivider()
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
                         Text(
-                            text = "访问地址:",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "连接信息",
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            text = "http://$ipAddress:$serverPort",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "用户名: $username",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "访问地址",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "http://$ipAddress:$serverPort",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                Text(
+                                    text = "用户名: $username",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
                     }
                 }
             }
             
-            // Control Buttons
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Button(
-                    onClick = {
-                        scope.launch {
-                            if (isServerRunning) {
-                                stopServer()
-                                isServerRunning = false
-                                serverStatus = "服务器已停止"
+            // Control Button
+            Button(
+                onClick = {
+                    scope.launch {
+                        if (isServerRunning) {
+                            stopServer()
+                            onServerRunningChange(false)
+                            onServerStatusChange("服务器已停止")
+                        } else {
+                            val success = startServer(username, password)
+                            if (success) {
+                                onServerRunningChange(true)
+                                onServerStatusChange("服务器运行中")
                             } else {
-                                val success = startServer(username, password)
-                                if (success) {
-                                    isServerRunning = true
-                                    serverStatus = "服务器运行中"
-                                } else {
-                                    serverStatus = "启动失败"
-                                }
+                                onServerStatusChange("启动失败")
                             }
                         }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isServerRunning) 
-                            MaterialTheme.colorScheme.error 
-                        else MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Icon(
-                        imageVector = if (isServerRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = null
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (isServerRunning) "停止服务器" else "启动服务器")
-                }
-            }
-            
-            // Info Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isServerRunning) 
+                        MaterialTheme.colorScheme.error 
+                    else MaterialTheme.colorScheme.primary
                 )
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
+                Icon(
+                    imageVector = if (isServerRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = if (isServerRunning) "停止服务器" else "启动服务器",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            // Quick Access Info
+            if (!isServerRunning) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
                 ) {
-                    Text(
-                        text = "使用说明",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "• 启动服务器后，可以通过局域网访问设备存储\n" +
-                              "• 需要使用设置的用户名和密码进行认证\n" +
-                              "• 默认端口: $serverPort\n" +
-                              "• 确保设备连接到WiFi网络\n" +
-                              "• 使用任何支持WebDAV的客户端连接",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = "快速开始",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "1. 确保设备连接到WiFi网络\n" +
+                                  "2. 在设置中配置用户名和密码\n" +
+                                  "3. 点击启动服务器按钮\n" +
+                                  "4. 使用WebDAV客户端连接",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -756,5 +861,37 @@ class CustomWebDAVServer(port: Int, private val rootDir: File, private val usern
             "mp3" -> "audio/mpeg"
             else -> "application/octet-stream"
         }
+    }
+}
+
+// Add the copyFileFromUri function to MainActivity
+private suspend fun copyFileFromUri(
+    context: android.content.Context,
+    uri: android.net.Uri,
+    targetDirectory: File,
+    fileName: String,
+    onProgress: (Float) -> Unit
+): Boolean = withContext(Dispatchers.IO) {
+    try {
+        val targetFile = File(targetDirectory, fileName)
+        
+        context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            java.io.FileOutputStream(targetFile).use { outputStream ->
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                
+                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                    outputStream.write(buffer, 0, bytesRead)
+                }
+                
+                outputStream.flush()
+            }
+        }
+        
+        onProgress(1.0f)
+        true
+    } catch (e: Exception) {
+        e.printStackTrace()
+        false
     }
 }
