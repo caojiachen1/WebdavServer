@@ -12,16 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Debug signing base64 length
-      run: |
-        echo "Length of base64 string: ${#SIGNING_KEYSTORE_P12_BASE64}"
-        if [ -z "$SIGNING_KEYSTORE_P12_BASE64" ]; then
-          echo "Error: SIGNING_KEYSTORE_P12_BASE64 is empty!"
-          exit 1
-        fi
-      env:
-        SIGNING_KEYSTORE_P12_BASE64: ${{ secrets.SIGNING_KEYSTORE_P12_BASE64 }}
-
     - name: Checkout code
       uses: actions/checkout@v4
       with:
