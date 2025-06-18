@@ -1,9 +1,7 @@
 package com.hqsrawmelon.webdavserver.utils
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.LinkProperties
-import android.net.Network
+import android.net.*
 import java.net.Inet4Address
 import java.net.NetworkInterface
 

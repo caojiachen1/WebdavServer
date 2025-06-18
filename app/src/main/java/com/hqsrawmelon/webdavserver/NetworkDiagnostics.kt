@@ -1,20 +1,15 @@
 package com.hqsrawmelon.webdavserver
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
+import android.content.*
+import android.net.*
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.net.InetSocketAddress
-import java.net.Socket
-import java.net.NetworkInterface
-import java.net.Inet4Address
+import kotlinx.coroutines.*
+import java.io.*
+import java.net.*
 
 class NetworkDiagnostics(private val context: Context) {
     

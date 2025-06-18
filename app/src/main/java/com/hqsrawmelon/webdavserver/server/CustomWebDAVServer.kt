@@ -1,17 +1,15 @@
 package com.hqsrawmelon.webdavserver.server
 
-import com.hqsrawmelon.webdavserver.LogManager
-import com.hqsrawmelon.webdavserver.SettingsManager
+import android.util.Base64
+import com.hqsrawmelon.webdavserver.*
 import com.hqsrawmelon.webdavserver.utils.WebDAVUtils
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.*
 import java.net.InetAddress
-import java.net.NetworkInterface
-import java.util.*
+import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
-import android.util.Base64
 
 class CustomWebDAVServer(
     private val port: Int,
