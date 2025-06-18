@@ -83,15 +83,9 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    
-    // Use the correct version for Material Compose
-    implementation("androidx.compose.material:material:1.5.4")
-
-    // Add Material Icons Extended for more icons
-    implementation("androidx.compose.material:material-icons-extended:1.5.4")
-    
-    // Add NanoHTTPD WebDAV server dependency
-    implementation("org.nanohttpd:nanohttpd-webserver:2.3.1")
+    implementation(libs.androidx.material)
+    implementation(libs.androidx.material.icons.extended)
+    implementation(libs.nanohttpd.webserver)
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
