@@ -1,4 +1,4 @@
-package com.hqsrawmelon.webdavserver
+package com.hqsrawmelon.webdavserver.utils
 
 import fi.iki.elonen.NanoHTTPD.*
 import java.io.File
@@ -6,7 +6,6 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 class WebDAVUtils {
-    
     fun generatePropFindResponse(file: File, uri: String, depth: String): String {
         val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
         dateFormat.timeZone = TimeZone.getTimeZone("GMT")
@@ -70,18 +69,19 @@ class WebDAVUtils {
         return newFixedLengthResponse(Response.Status.OK, "text/html", html.toString())
     }
     
-    fun getMimeTypeForFile(filename: String): String {
-        return when (filename.substringAfterLast('.').lowercase()) {
-            "txt" -> "text/plain"
+    fun getMimeTypeForFile(fileName: String): String {
+        return when (fileName.substringAfterLast('.', "").lowercase()) {
             "html", "htm" -> "text/html"
+            "txt" -> "text/plain"
             "css" -> "text/css"
             "js" -> "application/javascript"
             "json" -> "application/json"
             "xml" -> "application/xml"
-            "pdf" -> "application/pdf"
             "jpg", "jpeg" -> "image/jpeg"
             "png" -> "image/png"
             "gif" -> "image/gif"
+            "pdf" -> "application/pdf"
+            "zip" -> "application/zip"
             "mp4" -> "video/mp4"
             "mp3" -> "audio/mpeg"
             else -> "application/octet-stream"

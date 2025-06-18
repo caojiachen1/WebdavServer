@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
 class SettingsManager(context: Context) {
+    val context = context // Add this line to make context accessible
     private val prefs: SharedPreferences = context.getSharedPreferences("webdav_settings", Context.MODE_PRIVATE)
     
     // Authentication settings

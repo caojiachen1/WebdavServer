@@ -1,284 +1,425 @@
 package com.hqsrawmelon.webdavserver.server
 
-import android.util.Base64
+import com.hqsrawmelon.webdavserver.LogManager
 import com.hqsrawmelon.webdavserver.SettingsManager
+import com.hqsrawmelon.webdavserver.utils.WebDAVUtils
 import fi.iki.elonen.NanoHTTPD
-import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
-import java.io.IOException
-import java.text.SimpleDateFormat
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import java.io.*
+import java.net.InetAddress
+import java.net.NetworkInterface
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
+import android.util.Base64
 
 class CustomWebDAVServer(
-    port: Int, 
-    private val rootDir: File, 
-    private val username: String, 
+    private val port: Int,
+    private val rootDir: File,
+    private val username: String,
     private val password: String,
     private val allowAnonymous: Boolean = false,
-    private val settingsManager: SettingsManager? = null
+    private val settingsManager: SettingsManager
 ) : NanoHTTPD(port) {
+
+    private val webdavUtils = WebDAVUtils()
+    private val logManager = LogManager(settingsManager)
+    private val failedAttempts = ConcurrentHashMap<String, AttemptTracker>()
+    private val blockedIPs = ConcurrentHashMap<String, Long>()
     
+    data class AttemptTracker(var count: Int, var lastAttempt: Long)
+    
+    init {
+        if (!rootDir.exists()) {
+            rootDir.mkdirs()
+        }
+        logManager.logInfo("Server", "CustomWebDAVServer initialized on port $port")
+    }
+
     override fun serve(session: IHTTPSession): Response {
-        val method = session.method
-        val uri = session.uri
-        val headers = session.headers
+        val clientIP = getClientIP(session)
+        val enableLogging = runBlocking { settingsManager.enableLogging.first() }
         
-        // Check authentication for all methods except OPTIONS
-        if (method != Method.OPTIONS && !allowAnonymous && !isAuthenticated(headers)) {
-            val response = newFixedLengthResponse(Response.Status.UNAUTHORIZED, "text/plain", "Authentication required")
-            response.addHeader("WWW-Authenticate", "Basic realm=\"WebDAV Server\"")
-            return response
+        if (enableLogging) {
+            logManager.logInfo("Request", "Client ${clientIP} accessing ${session.uri}")
         }
         
-        // Add CORS headers
-        val response = when (method) {
-            Method.OPTIONS -> handleOptions()
+        // Check if IP is blocked
+        if (isIPBlocked(clientIP)) {
+            if (enableLogging) {
+                logManager.logWarn("Security", "Blocked IP $clientIP attempted access")
+            }
+            return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "IP blocked due to repeated failed attempts")
+        }
+        
+        // Check IP whitelist if enabled
+        if (!isIPAllowed(clientIP)) {
+            if (enableLogging) {
+                logManager.logWarn("Security", "IP $clientIP not in whitelist")
+            }
+            return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "IP not allowed")
+        }
+        
+        try {
+            val response = handleRequest(session, clientIP)
+            
+            // Add CORS headers if enabled
+            val enableCors = runBlocking { settingsManager.enableCors.first() }
+            if (enableCors) {
+                response.addHeader("Access-Control-Allow-Origin", "*")
+                response.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE")
+                response.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Depth, Destination")
+            }
+            
+            return response
+        } catch (e: Exception) {
+            if (enableLogging) {
+                logManager.logError("Server", "Error processing request from $clientIP: ${e.message}")
+            }
+            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Internal server error")
+        }
+    }
+    
+    private fun getClientIP(session: IHTTPSession): String {
+        // Try to get real IP from headers (for proxy setups)
+        val xForwardedFor = session.headers["x-forwarded-for"]
+        val xRealIP = session.headers["x-real-ip"]
+        
+        return when {
+            !xRealIP.isNullOrEmpty() -> xRealIP
+            !xForwardedFor.isNullOrEmpty() -> xForwardedFor.split(",")[0].trim()
+            else -> session.remoteIpAddress ?: "unknown"
+        }
+    }
+    
+    private fun isIPBlocked(clientIP: String): Boolean {
+        val blockDuration = runBlocking { settingsManager.blockDuration.first() } * 1000L
+        val blockedTime = blockedIPs[clientIP]
+        
+        return if (blockedTime != null) {
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - blockedTime > blockDuration) {
+                // Unblock IP after duration
+                blockedIPs.remove(clientIP)
+                failedAttempts.remove(clientIP)
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        }
+    }
+    
+    private fun isIPAllowed(clientIP: String): Boolean {
+        val enableIpWhitelist = runBlocking { settingsManager.enableIpWhitelist.first() }
+        if (!enableIpWhitelist) return true
+        
+        val ipWhitelist = runBlocking { settingsManager.ipWhitelist.first() }
+        
+        // Simple CIDR matching (basic implementation)
+        return try {
+            val whitelistRanges = ipWhitelist.split(",").map { it.trim() }
+            whitelistRanges.any { range ->
+                if (range.contains("/")) {
+                    // CIDR notation
+                    isIPInCIDR(clientIP, range)
+                } else {
+                    // Direct IP match
+                    clientIP == range
+                }
+            }
+        } catch (e: Exception) {
+            logManager.logError("Security", "Error checking IP whitelist: ${e.message}")
+            true // Allow access if whitelist check fails
+        }
+    }
+    
+    private fun isIPInCIDR(ip: String, cidr: String): Boolean {
+        try {
+            val parts = cidr.split("/")
+            if (parts.size != 2) return false
+            
+            val network = InetAddress.getByName(parts[0])
+            val prefixLength = parts[1].toInt()
+            val targetIP = InetAddress.getByName(ip)
+            
+            if (network.address.size != targetIP.address.size) return false
+            
+            val mask = (-1L shl (32 - prefixLength)).toInt()
+            val networkBytes = network.address
+            val targetBytes = targetIP.address
+            
+            val networkInt = ((networkBytes[0].toInt() and 0xFF) shl 24) or
+                           ((networkBytes[1].toInt() and 0xFF) shl 16) or
+                           ((networkBytes[2].toInt() and 0xFF) shl 8) or
+                           (networkBytes[3].toInt() and 0xFF)
+            
+            val targetInt = ((targetBytes[0].toInt() and 0xFF) shl 24) or
+                          ((targetBytes[1].toInt() and 0xFF) shl 16) or
+                          ((targetBytes[2].toInt() and 0xFF) shl 8) or
+                          (targetBytes[3].toInt() and 0xFF)
+            
+            return (networkInt and mask) == (targetInt and mask)
+        } catch (e: Exception) {
+            return false
+        }
+    }
+    
+    private fun recordFailedAttempt(clientIP: String) {
+        val maxFailedAttempts = runBlocking { settingsManager.maxFailedAttempts.first() }
+        val currentTime = System.currentTimeMillis()
+        
+        val tracker = failedAttempts.getOrPut(clientIP) { AttemptTracker(0, currentTime) }
+        tracker.count++
+        tracker.lastAttempt = currentTime
+        
+        if (tracker.count >= maxFailedAttempts) {
+            blockedIPs[clientIP] = currentTime
+            logManager.logWarn("Security", "IP $clientIP blocked after $maxFailedAttempts failed attempts")
+        }
+    }
+    
+    private fun handleRequest(session: IHTTPSession, clientIP: String): Response {
+        val method = session.method
+        val uri = session.uri
+        val enableLogging = runBlocking { settingsManager.enableLogging.first() }
+        
+        // Handle authentication if not anonymous
+        if (!allowAnonymous) {
+            val authHeader = session.headers["authorization"]
+            if (!isAuthenticated(authHeader)) {
+                recordFailedAttempt(clientIP)
+                if (enableLogging) {
+                    logManager.logWarn("Auth", "Authentication failed for IP $clientIP")
+                }
+                val response = newFixedLengthResponse(Response.Status.UNAUTHORIZED, MIME_PLAINTEXT, "Authentication required")
+                response.addHeader("WWW-Authenticate", "Basic realm=\"WebDAV\"")
+                return response
+            } else {
+                // Reset failed attempts on successful auth
+                failedAttempts.remove(clientIP)
+                if (enableLogging) {
+                    logManager.logInfo("Auth", "Authentication successful for IP $clientIP")
+                }
+            }
+        }
+        
+        return when (method) {
             Method.GET -> handleGet(uri)
             Method.PUT -> handlePut(session, uri)
             Method.DELETE -> handleDelete(uri)
-            Method.MKCOL -> handleMkCol(uri)
-            Method.PROPFIND -> handlePropFind(uri, headers)
-            Method.PROPPATCH -> handlePropPatch()
-            Method.MOVE -> handleMove(session, uri)
-            Method.COPY -> handleCopy(session, uri)
-            else -> newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, "text/plain", "Method not allowed")
-        }
-        
-        // Add WebDAV headers
-        response.addHeader("DAV", "1,2")
-        response.addHeader("Access-Control-Allow-Origin", "*")
-        response.addHeader("Access-Control-Allow-Methods", "GET, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, OPTIONS")
-        response.addHeader("Access-Control-Allow-Headers", "Content-Type, Depth, Authorization, Date, User-Agent, X-File-Size, X-Requested-With, If-Modified-Since, X-File-Name, Cache-Control")
-        response.addHeader("Access-Control-Expose-Headers", "DAV")
-        
-        return response
-    }
-    
-    private fun isAuthenticated(headers: Map<String, String>): Boolean {
-        val authHeader = headers["authorization"] ?: return false
-        
-        if (!authHeader.startsWith("Basic ")) {
-            return false
-        }
-        
-        try {
-            val encoded = authHeader.substring(6)
-            val decoded = String(Base64.decode(encoded, Base64.DEFAULT))
-            val parts = decoded.split(":", limit = 2)
-            
-            if (parts.size != 2) {
-                return false
+            Method.OPTIONS -> handleOptions()
+            else -> {
+                // Handle WebDAV methods
+                when (session.headers["method"] ?: method.name) {
+                    "PROPFIND" -> handlePropfind(session, uri)
+                    "PROPPATCH" -> handleProppatch(uri)
+                    "MKCOL" -> handleMkcol(uri)
+                    "COPY" -> handleCopy(session, uri)
+                    "MOVE" -> handleMove(session, uri)
+                    else -> newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Method not allowed")
+                }
             }
+        }
+    }
+
+    private fun isAuthenticated(authHeader: String?): Boolean {
+        if (allowAnonymous) return true
+        if (authHeader == null || !authHeader.startsWith("Basic ")) return false
+        
+        try {
+            val encodedCredentials = authHeader.substring(6)
+            val decodedCredentials = String(Base64.decode(encodedCredentials, Base64.DEFAULT))
+            val parts = decodedCredentials.split(":", limit = 2)
             
-            return parts[0] == username && parts[1] == password
-        } catch (_: Exception) {
+            return parts.size == 2 && parts[0] == username && parts[1] == password
+        } catch (e: Exception) {
             return false
         }
     }
-    
-    private fun handleOptions(): Response {
-        val response = newFixedLengthResponse(Response.Status.OK, "text/plain", "")
-        response.addHeader("Allow", "GET, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, OPTIONS")
-        return response
-    }
-    
+
     private fun handleGet(uri: String): Response {
-        val decodedUri = java.net.URLDecoder.decode(uri, "UTF-8")
-        val file = File(rootDir, decodedUri.removePrefix("/"))
+        val file = File(rootDir, uri.removePrefix("/"))
         
-        if (!file.exists()) {
-            return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "File not found")
-        }
-        
-        if (file.isDirectory) {
-            return generateDirectoryListing(file, uri)
-        }
-        
-        try {
-            val fis = FileInputStream(file)
-            val mimeType = getCustomMimeType(file.name)
-            val response = newFixedLengthResponse(Response.Status.OK, mimeType, fis, file.length())
-            response.addHeader("Content-Length", file.length().toString())
-            response.addHeader("Accept-Ranges", "bytes")
-            return response
-        } catch (_: IOException) {
-            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error reading file")
+        return when {
+            !file.exists() -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "File not found")
+            file.isDirectory -> {
+                // Return directory listing as HTML
+                val html = generateDirectoryListing(file, uri)
+                newFixedLengthResponse(Response.Status.OK, "text/html", html)
+            }
+            else -> {
+                try {
+                    val mimeType = webdavUtils.getMimeTypeForFile(file.name)
+                    val inputStream = FileInputStream(file)
+                    newChunkedResponse(Response.Status.OK, mimeType, inputStream)
+                } catch (e: IOException) {
+                    newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Error reading file")
+                }
+            }
         }
     }
-    
+
     private fun handlePut(session: IHTTPSession, uri: String): Response {
-        val decodedUri = java.net.URLDecoder.decode(uri, "UTF-8")
-        val file = File(rootDir, decodedUri.removePrefix("/"))
-        val fileExists = file.exists()
+        val file = File(rootDir, uri.removePrefix("/"))
         
-        try {
+        return try {
             file.parentFile?.mkdirs()
             
-            // Get content length from headers
-            val contentLength = session.headers["content-length"]?.toLongOrNull() ?: 0L
+            val body = HashMap<String, String>()
+            session.parseBody(body)
             
-            // Write file directly from input stream without parsing body
-            FileOutputStream(file).use { fos ->
-                val buffer = ByteArray(8192)
-                var totalBytesRead = 0L
-                var bytesRead: Int
-                
-                while (session.inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    fos.write(buffer, 0, bytesRead)
-                    totalBytesRead += bytesRead
-                    
-                    // Break if we've read all expected content
-                    if (contentLength > 0 && totalBytesRead >= contentLength) {
-                        break
-                    }
-                }
-                fos.flush()
+            val postData = body["postData"]
+            if (postData != null) {
+                file.writeText(postData)
+            } else {
+                // Handle binary data
+                val inputStream = session.inputStream
+                val outputStream = FileOutputStream(file)
+                inputStream.copyTo(outputStream)
+                outputStream.close()
             }
             
-            // Return appropriate status code
-            val status = if (fileExists) Response.Status.NO_CONTENT else Response.Status.CREATED
-            return newFixedLengthResponse(status, "text/plain", "")
+            logManager.logInfo("File", "File uploaded: ${file.absolutePath}")
+            newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "File created")
         } catch (e: Exception) {
-            e.printStackTrace()
-            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error creating file: ${e.message}")
+            logManager.logError("File", "Error uploading file: ${e.message}")
+            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Error creating file")
         }
     }
-    
+
     private fun handleDelete(uri: String): Response {
         val file = File(rootDir, uri.removePrefix("/"))
         
-        if (!file.exists()) {
-            return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "File not found")
-        }
-        
-        val deleted = if (file.isDirectory) {
-            file.deleteRecursively()
+        return if (file.exists()) {
+            val deleted = if (file.isDirectory) file.deleteRecursively() else file.delete()
+            if (deleted) {
+                logManager.logInfo("File", "File/directory deleted: ${file.absolutePath}")
+                newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
+            } else {
+                newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Error deleting file")
+            }
         } else {
-            file.delete()
-        }
-        
-        return if (deleted) {
-            newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", "")
-        } else {
-            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error deleting file")
+            newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "File not found")
         }
     }
-    
-    private fun handleMkCol(uri: String): Response {
-        val file = File(rootDir, uri.removePrefix("/"))
-        
-        if (file.exists()) {
-            return newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, "text/plain", "Directory already exists")
-        }
-        
-        val created = file.mkdirs()
-        return if (created) {
-            newFixedLengthResponse(Response.Status.CREATED, "text/plain", "Directory created")
-        } else {
-            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error creating directory")
-        }
+
+    private fun handleOptions(): Response {
+        val response = newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "")
+        response.addHeader("Allow", "OPTIONS, GET, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE")
+        response.addHeader("DAV", "1,2")
+        return response
     }
-    
-    private fun handlePropFind(uri: String, headers: Map<String, String>): Response {
+
+    private fun handlePropfind(session: IHTTPSession, uri: String): Response {
         val file = File(rootDir, uri.removePrefix("/"))
         
         if (!file.exists()) {
-            return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "File not found")
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "File not found")
         }
         
-        val depth = headers["depth"] ?: "1"
-        val xml = generatePropFindResponse(file, uri, depth)
+        val depth = session.headers["depth"] ?: "1"
+        val xml = generatePropfindXml(file, uri, depth)
         
-        return newFixedLengthResponse(Response.Status.MULTI_STATUS, "application/xml; charset=utf-8", xml)
+        val response = newFixedLengthResponse(Response.Status.MULTI_STATUS, "application/xml", xml)
+        response.addHeader("Content-Type", "application/xml; charset=utf-8")
+        return response
     }
-    
-    private fun handlePropPatch(): Response {
-        return newFixedLengthResponse(Response.Status.OK, "application/xml", """
-            <?xml version="1.0" encoding="utf-8"?>
+
+    private fun handleProppatch(uri: String): Response {
+        return newFixedLengthResponse(Response.Status.OK, "application/xml", 
+            """<?xml version="1.0" encoding="UTF-8"?>
             <D:multistatus xmlns:D="DAV:">
                 <D:response>
+                    <D:href>$uri</D:href>
                     <D:propstat>
+                        <D:prop/>
                         <D:status>HTTP/1.1 200 OK</D:status>
                     </D:propstat>
                 </D:response>
-            </D:multistatus>
-        """.trimIndent())
+            </D:multistatus>""")
     }
-    
-    private fun handleMove(session: IHTTPSession, uri: String): Response {
-        val destination = session.headers["destination"] ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Missing destination")
-        val decodedUri = java.net.URLDecoder.decode(uri, "UTF-8")
-        val sourceFile = File(rootDir, decodedUri.removePrefix("/"))
+
+    private fun handleMkcol(uri: String): Response {
+        val file = File(rootDir, uri.removePrefix("/"))
         
-        // Parse destination URL more robustly
-        val destUri = try {
-            val url = java.net.URL(destination)
-            java.net.URLDecoder.decode(url.path, "UTF-8")
-        } catch (_: Exception) {
-            destination.substringAfter("://").substringAfter("/").substringAfter(":")
-        }
-        
-        val destFile = File(rootDir, destUri.removePrefix("/"))
-        
-        if (!sourceFile.exists()) {
-            return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Source not found")
-        }
-        
-        destFile.parentFile?.mkdirs()
-        val moved = sourceFile.renameTo(destFile)
-        
-        return if (moved) {
-            newFixedLengthResponse(Response.Status.CREATED, "text/plain", "")
+        return if (file.mkdirs()) {
+            logManager.logInfo("File", "Directory created: ${file.absolutePath}")
+            newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "Directory created")
         } else {
-            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Move failed")
+            newFixedLengthResponse(Response.Status.CONFLICT, MIME_PLAINTEXT, "Cannot create directory")
         }
     }
-    
+
     private fun handleCopy(session: IHTTPSession, uri: String): Response {
-        val destination = session.headers["destination"] ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Missing destination")
-        val decodedUri = java.net.URLDecoder.decode(uri, "UTF-8")
-        val sourceFile = File(rootDir, decodedUri.removePrefix("/"))
+        val source = File(rootDir, uri.removePrefix("/"))
+        val destination = session.headers["destination"]?.let { dest ->
+            File(rootDir, dest.removePrefix("/"))
+        } ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Missing destination")
         
-        // Parse destination URL more robustly
-        val destUri = try {
-            val url = java.net.URL(destination)
-            java.net.URLDecoder.decode(url.path, "UTF-8")
-        } catch (_: Exception) {
-            destination.substringAfter("://").substringAfter("/").substringAfter(":")
-        }
-        
-        val destFile = File(rootDir, destUri.removePrefix("/"))
-        
-        if (!sourceFile.exists()) {
-            return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Source not found")
-        }
-        
-        try {
-            destFile.parentFile?.mkdirs()
-            sourceFile.copyTo(destFile, overwrite = true)
-            return newFixedLengthResponse(Response.Status.CREATED, "text/plain", "")
+        return try {
+            if (source.isDirectory) {
+                source.copyRecursively(destination)
+            } else {
+                source.copyTo(destination)
+            }
+            logManager.logInfo("File", "File/directory copied from ${source.absolutePath} to ${destination.absolutePath}")
+            newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "Resource copied")
         } catch (e: Exception) {
-            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Copy failed: ${e.message}")
+            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Error copying resource")
         }
     }
+
+    private fun handleMove(session: IHTTPSession, uri: String): Response {
+        val source = File(rootDir, uri.removePrefix("/"))
+        val destination = session.headers["destination"]?.let { dest ->
+            File(rootDir, dest.removePrefix("/"))
+        } ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Missing destination")
+        
+        return if (source.renameTo(destination)) {
+            logManager.logInfo("File", "File/directory moved from ${source.absolutePath} to ${destination.absolutePath}")
+            newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "Resource moved")
+        } else {
+            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Error moving resource")
+        }
+    }
+
+    // ...existing code for helper methods...
     
-    private fun generatePropFindResponse(file: File, uri: String, depth: String): String {
-        val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
-        dateFormat.timeZone = TimeZone.getTimeZone("GMT")
+    private fun generateDirectoryListing(dir: File, uri: String): String {
+        val sb = StringBuilder()
+        sb.append("<!DOCTYPE html><html><head><title>Directory: $uri</title></head><body>")
+        sb.append("<h1>Directory: $uri</h1><hr>")
+        sb.append("<ul>")
         
+        if (uri != "/") {
+            val parentUri = File(uri).parent?.replace("\\", "/") ?: "/"
+            sb.append("<li><a href=\"$parentUri\">[Parent Directory]</a></li>")
+        }
+        
+        dir.listFiles()?.sortedBy { it.name }?.forEach { file ->
+            val fileName = file.name
+            val fileUri = if (uri.endsWith("/")) uri + fileName else "$uri/$fileName"
+            val displayName = if (file.isDirectory) "[$fileName]" else fileName
+            sb.append("<li><a href=\"$fileUri\">$displayName</a></li>")
+        }
+        
+        sb.append("</ul><hr></body></html>")
+        return sb.toString()
+    }
+    
+    private fun generatePropfindXml(file: File, uri: String, depth: String): String {
         val xml = StringBuilder()
-        xml.append("""<?xml version="1.0" encoding="utf-8"?>""")
-        xml.append("""<D:multistatus xmlns:D="DAV:">""")
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+        xml.append("<D:multistatus xmlns:D=\"DAV:\">\n")
         
-        // Add current resource
-        xml.append(generateResourceResponse(file, uri, dateFormat))
+        addResourceToXml(xml, file, uri)
         
-        // Add children if depth > 0 and it's a directory
         if (depth != "0" && file.isDirectory) {
             file.listFiles()?.forEach { child ->
                 val childUri = if (uri.endsWith("/")) uri + child.name else "$uri/${child.name}"
-                xml.append(generateResourceResponse(child, childUri, dateFormat))
+                addResourceToXml(xml, child, childUri)
             }
         }
         
@@ -286,61 +427,22 @@ class CustomWebDAVServer(
         return xml.toString()
     }
     
-    private fun generateResourceResponse(file: File, uri: String, dateFormat: SimpleDateFormat): String {
-        val lastModified = dateFormat.format(Date(file.lastModified()))
-        val isCollection = if (file.isDirectory) "<D:collection/>" else ""
-        val contentLength = if (!file.isDirectory) "<D:getcontentlength>${file.length()}</D:getcontentlength>" else ""
-        val contentType = if (!file.isDirectory) "<D:getcontenttype>${getCustomMimeType(file.name)}</D:getcontenttype>" else ""
-        
-        return """
-            <D:response>
-                <D:href>$uri</D:href>
-                <D:propstat>
-                    <D:prop>
-                        <D:displayname>${file.name}</D:displayname>
-                        <D:getlastmodified>$lastModified</D:getlastmodified>
-                        <D:resourcetype>$isCollection</D:resourcetype>
-                        $contentLength
-                        $contentType
-                    </D:prop>
-                    <D:status>HTTP/1.1 200 OK</D:status>
-                </D:propstat>
-            </D:response>
-        """.trimIndent()
-    }
-    
-    private fun generateDirectoryListing(dir: File, uri: String): Response {
-        val html = StringBuilder()
-        html.append("<html><body><h1>Directory listing for $uri</h1><ul>")
-        
-        if (uri != "/") {
-            html.append("<li><a href=\"../\">../</a></li>")
+    private fun addResourceToXml(xml: StringBuilder, file: File, uri: String) {
+        xml.append("<D:response>\n")
+        xml.append("<D:href>$uri</D:href>\n")
+        xml.append("<D:propstat>\n")
+        xml.append("<D:prop>\n")
+        xml.append("<D:resourcetype>")
+        if (file.isDirectory) xml.append("<D:collection/>")
+        xml.append("</D:resourcetype>\n")
+        xml.append("<D:getcontentlength>${if (file.isFile) file.length() else 0}</D:getcontentlength>\n")
+        xml.append("<D:getlastmodified>${Date(file.lastModified())}</D:getlastmodified>\n")
+        if (file.isFile) {
+            xml.append("<D:getcontenttype>${webdavUtils.getMimeTypeForFile(file.name)}</D:getcontenttype>\n")
         }
-        
-        dir.listFiles()?.forEach { file ->
-            val name = if (file.isDirectory) "${file.name}/" else file.name
-            html.append("<li><a href=\"$name\">$name</a></li>")
-        }
-        
-        html.append("</ul></body></html>")
-        return newFixedLengthResponse(Response.Status.OK, "text/html", html.toString())
-    }
-    
-    private fun getCustomMimeType(filename: String): String {
-        return when (filename.substringAfterLast('.').lowercase()) {
-            "txt" -> "text/plain"
-            "html", "htm" -> "text/html"
-            "css" -> "text/css"
-            "js" -> "application/javascript"
-            "json" -> "application/json"
-            "xml" -> "application/xml"
-            "pdf" -> "application/pdf"
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            "gif" -> "image/gif"
-            "mp4" -> "video/mp4"
-            "mp3" -> "audio/mpeg"
-            else -> "application/octet-stream"
-        }
+        xml.append("</D:prop>\n")
+        xml.append("<D:status>HTTP/1.1 200 OK</D:status>\n")
+        xml.append("</D:propstat>\n")
+        xml.append("</D:response>\n")
     }
 }

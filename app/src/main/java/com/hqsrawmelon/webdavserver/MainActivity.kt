@@ -66,6 +66,7 @@ import com.hqsrawmelon.webdavserver.utils.copyFileFromUri
 import com.hqsrawmelon.webdavserver.utils.getLocalIpAddress
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -570,10 +571,30 @@ class MainActivity : ComponentActivity() {
                 allowAnonymous = allowAnonymous,
                 settingsManager = settingsManager
             )
-            webServer?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            
+            // Apply connection timeout and max connections from settings
+            val connectionTimeout = settingsManager.connectionTimeout.first() * 1000 // Convert to milliseconds
+            val maxConnections = settingsManager.maxConnections.first()
+            
+            // Start server with custom timeout
+            webServer?.start(connectionTimeout, false)
+            
+            // Log server start
+            if (settingsManager.enableLogging.first()) {
+                val logManager = LogManager(this@MainActivity)
+                logManager.logInfo("Server", "WebDAV server started on port $port with timeout ${connectionTimeout}ms and max $maxConnections connections")
+            }
+            
             true
         } catch (e: IOException) {
             e.printStackTrace()
+            
+            // Log error
+            if (settingsManager.enableLogging.first()) {
+                val logManager = LogManager(this@MainActivity)
+                logManager.logError("Server", "Failed to start server: ${e.message}")
+            }
+            
             false
         }
     }
@@ -581,6 +602,18 @@ class MainActivity : ComponentActivity() {
     private fun stopServer() {
         webServer?.stop()
         webServer = null
+        
+        // Log server stop
+        try {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                if (settingsManager.enableLogging.first()) {
+                    val logManager = LogManager(this@MainActivity)
+                    logManager.logInfo("Server", "WebDAV server stopped")
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore logging errors during shutdown
+        }
     }
     
     override fun onDestroy() {

@@ -184,7 +184,7 @@ fun SettingsScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "服务器运行时无法修改设置",
+                                    text = "服务器运行时部分设置无法修改，需重启服务器生效",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onErrorContainer
                                 )
@@ -921,7 +921,7 @@ fun SettingsScreen(
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.onErrorContainer,
+                                            containerColor = MaterialTheme.colorScheme.errorContainer,
                                             contentColor = MaterialTheme.colorScheme.errorContainer
                                         ),
                                         modifier = Modifier.fillMaxWidth()

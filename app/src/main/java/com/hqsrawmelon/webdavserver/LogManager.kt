@@ -1,103 +1,123 @@
 package com.hqsrawmelon.webdavserver
 
 import android.content.Context
-import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import java.io.File
+import java.io.FileWriter
 import java.text.SimpleDateFormat
 import java.util.*
 
 class LogManager(private val context: Context) {
-    private val logFile = File(context.filesDir, "webdav_server.log")
+    
+    // Secondary constructor for SettingsManager integration
+    constructor(settingsManager: SettingsManager) : this(settingsManager.context) {
+        this.settingsManager = settingsManager
+    }
+    
+    private var settingsManager: SettingsManager? = null
+    private val logFile = File(context.getExternalFilesDir("logs"), "webdav.log")
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
     
-    suspend fun writeLog(level: String, tag: String, message: String) = withContext(Dispatchers.IO) {
-        try {
-            val timestamp = dateFormat.format(Date())
-            val logEntry = "[$timestamp] $level/$tag: $message\n"
-            logFile.appendText(logEntry)
+    init {
+        logFile.parentFile?.mkdirs()
+    }
+    
+    private fun shouldLog(level: String): Boolean {
+        val settingsManager = this.settingsManager ?: return true
+        
+        return runBlocking {
+            val enableLogging = settingsManager.enableLogging.first()
+            if (!enableLogging) return@runBlocking false
             
-            // Check file size and rotate if necessary
-            checkAndRotateLog()
-        } catch (e: Exception) {
-            Log.e("LogManager", "Failed to write log", e)
+            val currentLogLevel = settingsManager.logLevel.first()
+            val levelPriority = mapOf(
+                "DEBUG" to 0,
+                "INFO" to 1,
+                "WARN" to 2,
+                "ERROR" to 3
+            )
+            
+            (levelPriority[level] ?: 0) >= (levelPriority[currentLogLevel] ?: 1)
         }
     }
     
-    suspend fun readLogs(): String = withContext(Dispatchers.IO) {
+    private fun rotateLogIfNeeded() {
+        val settingsManager = this.settingsManager ?: return
+        
+        runBlocking {
+            val maxLogSize = settingsManager.maxLogSize.first() * 1024 * 1024 // Convert MB to bytes
+            
+            if (logFile.exists() && logFile.length() > maxLogSize) {
+                val backupFile = File(logFile.parent, "webdav_backup.log")
+                if (backupFile.exists()) backupFile.delete()
+                logFile.renameTo(backupFile)
+            }
+        }
+    }
+    
+    private fun writeLog(level: String, tag: String, message: String) {
+        if (!shouldLog(level)) return
+        
         try {
+            rotateLogIfNeeded()
+            
+            val timestamp = dateFormat.format(Date())
+            val logEntry = "[$timestamp] $level/$tag: $message\n"
+            
+            FileWriter(logFile, true).use { writer ->
+                writer.write(logEntry)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+    
+    fun logDebug(tag: String, message: String) = writeLog("DEBUG", tag, message)
+    fun logInfo(tag: String, message: String) = writeLog("INFO", tag, message)
+    fun logWarn(tag: String, message: String) = writeLog("WARN", tag, message)
+    fun logError(tag: String, message: String) = writeLog("ERROR", tag, message)
+    
+    fun readLogs(): String {
+        return try {
             if (logFile.exists()) {
                 logFile.readText()
             } else {
-                "暂无日志记录"
+                "No logs available"
             }
         } catch (e: Exception) {
-            Log.e("LogManager", "Failed to read logs", e)
-            "读取日志失败: ${e.message}"
+            "Error reading logs: ${e.message}"
         }
     }
     
-    suspend fun clearLogs() = withContext(Dispatchers.IO) {
+    fun clearLogs() {
         try {
             if (logFile.exists()) {
                 logFile.delete()
             }
-        } catch (e: Exception) {
-            Log.e("LogManager", "Failed to clear logs", e)
-            throw e
-        }
-    }
-    
-    suspend fun getLogSize(): String = withContext(Dispatchers.IO) {
-        try {
-            if (logFile.exists()) {
-                val sizeBytes = logFile.length()
-                when {
-                    sizeBytes < 1024 -> "${sizeBytes}B"
-                    sizeBytes < 1024 * 1024 -> "${sizeBytes / 1024}KB"
-                    else -> "${sizeBytes / (1024 * 1024)}MB"
-                }
-            } else {
-                "0B"
-            }
-        } catch (_: Exception) {
-            "未知"
-        }
-    }
-    
-    private suspend fun checkAndRotateLog() = withContext(Dispatchers.IO) {
-        try {
-            val maxSizeBytes = 10 * 1024 * 1024 // 10MB default
-            if (logFile.exists() && logFile.length() > maxSizeBytes) {
-                val backupFile = File(context.filesDir, "webdav_server.log.old")
-                if (backupFile.exists()) {
-                    backupFile.delete()
-                }
-                logFile.renameTo(backupFile)
+            val backupFile = File(logFile.parent, "webdav_backup.log")
+            if (backupFile.exists()) {
+                backupFile.delete()
             }
         } catch (e: Exception) {
-            Log.e("LogManager", "Failed to rotate log", e)
+            throw Exception("Failed to clear logs: ${e.message}")
         }
     }
     
-    fun logInfo(tag: String, message: String) {
-        Log.i(tag, message)
-        // Can be extended to write to file asynchronously
-    }
-    
-    fun logError(tag: String, message: String, throwable: Throwable? = null) {
-        Log.e(tag, message, throwable)
-        // Can be extended to write to file asynchronously
-    }
-    
-    fun logDebug(tag: String, message: String) {
-        Log.d(tag, message)
-        // Can be extended to write to file asynchronously
-    }
-    
-    fun logWarn(tag: String, message: String) {
-        Log.w(tag, message)
-        // Can be extended to write to file asynchronously
+    fun getLogSize(): String {
+        return try {
+            val totalSize = (if (logFile.exists()) logFile.length() else 0) +
+                          (File(logFile.parent, "webdav_backup.log").let { 
+                              if (it.exists()) it.length() else 0 
+                          })
+            
+            when {
+                totalSize > 1024 * 1024 -> "${totalSize / (1024 * 1024)}MB"
+                totalSize > 1024 -> "${totalSize / 1024}KB"
+                else -> "${totalSize}B"
+            }
+        } catch (e: Exception) {
+            "0B"
+        }
     }
 }
