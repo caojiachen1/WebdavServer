@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircleOutline
@@ -174,8 +176,9 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun MainApp() {
-        var selectedTab by remember { mutableStateOf(0) }
+        val pagerState = rememberPagerState(pageCount = { 3 })
         val webdavRootDir = remember { File(getExternalFilesDir(null), "webdav") }
+        val scope = rememberCoroutineScope()
         
         // Move server state to this level to persist across tab switches
         var isServerRunning by remember { mutableStateOf(false) }
@@ -191,7 +194,6 @@ class MainActivity : ComponentActivity() {
         // File manager state for navigation
         var currentDirectory by remember { mutableStateOf(webdavRootDir) }
         var refreshTrigger by remember { mutableStateOf(0) }
-        val scope = rememberCoroutineScope()
         val context = LocalContext.current
         
         // File picker launcher for file manager
@@ -231,7 +233,7 @@ class MainActivity : ComponentActivity() {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             topBar = {
-                when (selectedTab) {
+                when (pagerState.currentPage) {
                     0 -> TopAppBar(
                         title = { 
                             Text(
@@ -287,32 +289,45 @@ class MainActivity : ComponentActivity() {
             bottomBar = {
                 NavigationBar {
                     NavigationBarItem(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
+                        selected = pagerState.currentPage == 0,
+                        onClick = { 
+                            scope.launch {
+                                pagerState.animateScrollToPage(0)
+                            }
+                        },
                         icon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
                         label = { Text("服务器") }
                     )
                     NavigationBarItem(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
+                        selected = pagerState.currentPage == 1,
+                        onClick = { 
+                            scope.launch {
+                                pagerState.animateScrollToPage(1)
+                            }
+                        },
                         icon = { Icon(Icons.Default.Folder, contentDescription = null) },
                         label = { Text("文件管理") }
                     )
                     NavigationBarItem(
-                        selected = selectedTab == 2,
-                        onClick = { selectedTab = 2 },
+                        selected = pagerState.currentPage == 2,
+                        onClick = { 
+                            scope.launch {
+                                pagerState.animateScrollToPage(2)
+                            }
+                        },
                         icon = { Icon(Icons.Default.Settings, contentDescription = null) },
                         label = { Text("设置") }
                     )
                 }
             }
         ) { innerPadding ->
-            Box(
+            HorizontalPager(
+                state = pagerState,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-            ) {
-                when (selectedTab) {
+            ) { page ->
+                when (page) {
                     0 -> WebDAVServerApp(
                         isServerRunning = isServerRunning,
                         onServerRunningChange = { isServerRunning = it },
