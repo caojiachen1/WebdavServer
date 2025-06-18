@@ -6,6 +6,7 @@ import android.os.Build
 import androidx.activity.compose.*
 import androidx.activity.result.contract.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.*
