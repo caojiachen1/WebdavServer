@@ -61,7 +61,7 @@ class LogManager(private val context: Context) {
             } else {
                 "0B"
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             "未知"
         }
     }

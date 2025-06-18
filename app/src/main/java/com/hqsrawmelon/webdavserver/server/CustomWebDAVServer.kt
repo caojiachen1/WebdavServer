@@ -72,7 +72,7 @@ class CustomWebDAVServer(
             }
             
             return parts[0] == username && parts[1] == password
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return false
         }
     }
@@ -102,7 +102,7 @@ class CustomWebDAVServer(
             response.addHeader("Content-Length", file.length().toString())
             response.addHeader("Accept-Ranges", "bytes")
             return response
-        } catch (e: IOException) {
+        } catch (_: IOException) {
             return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error reading file")
         }
     }
@@ -215,7 +215,7 @@ class CustomWebDAVServer(
         val destUri = try {
             val url = java.net.URL(destination)
             java.net.URLDecoder.decode(url.path, "UTF-8")
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             destination.substringAfter("://").substringAfter("/").substringAfter(":")
         }
         
@@ -244,7 +244,7 @@ class CustomWebDAVServer(
         val destUri = try {
             val url = java.net.URL(destination)
             java.net.URLDecoder.decode(url.path, "UTF-8")
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             destination.substringAfter("://").substringAfter("/").substringAfter(":")
         }
         
