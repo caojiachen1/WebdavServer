@@ -2,20 +2,32 @@ package com.hqsrawmelon.webdavserver
 
 import fi.iki.elonen.NanoHTTPD.*
 import com.hqsrawmelon.webdavserver.utils.WebDAVUtils
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import java.io.*
 import java.net.URLDecoder
+import java.util.zip.GZIPInputStream
 
 class WebDAVHandler(private val rootDir: File) {
     
     private val webdavUtils = WebDAVUtils()
     
-    fun handleOptions(): Response {
+    fun handleOptions(settingsManager: SettingsManager): Response {
         val response = newFixedLengthResponse(Response.Status.OK, "text/plain", "")
         response.addHeader("Allow", "GET, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, OPTIONS")
+        
+        runBlocking {
+            if (settingsManager.enableCors.first()) {
+                response.addHeader("Access-Control-Allow-Origin", "*")
+                response.addHeader("Access-Control-Allow-Methods", "GET, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, OPTIONS")
+                response.addHeader("Access-Control-Allow-Headers", "Content-Type, Depth, Authorization, If-Match, If-None-Match")
+            }
+        }
+        
         return response
     }
     
-    fun handleGet(uri: String): Response {
+    fun handleGet(uri: String, settingsManager: SettingsManager): Response {
         val decodedUri = URLDecoder.decode(uri, "UTF-8")
         val file = File(rootDir, decodedUri.removePrefix("/"))
         
@@ -30,16 +42,27 @@ class WebDAVHandler(private val rootDir: File) {
         try {
             val fis = FileInputStream(file)
             val mimeType = webdavUtils.getMimeTypeForFile(file.name)
-            val response = newFixedLengthResponse(Response.Status.OK, mimeType, fis, file.length())
-            response.addHeader("Content-Length", file.length().toString())
-            response.addHeader("Accept-Ranges", "bytes")
-            return response
+            
+            return runBlocking {
+                if (settingsManager.enableCompression.first()) {
+                    val gzipStream = GZIPInputStream(fis)
+                    val response = newChunkedResponse(Response.Status.OK, mimeType, gzipStream)
+                    response.addHeader("Content-Encoding", "gzip")
+                    response.addHeader("Accept-Ranges", "bytes")
+                    response
+                } else {
+                    val response = newFixedLengthResponse(Response.Status.OK, mimeType, fis, file.length())
+                    response.addHeader("Content-Length", file.length().toString())
+                    response.addHeader("Accept-Ranges", "bytes")
+                    response
+                }
+            }
         } catch (e: IOException) {
             return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error reading file")
         }
     }
     
-    fun handlePut(session: IHTTPSession, uri: String): Response {
+    fun handlePut(session: IHTTPSession, uri: String, settingsManager: SettingsManager): Response {
         val decodedUri = URLDecoder.decode(uri, "UTF-8")
         val file = File(rootDir, decodedUri.removePrefix("/"))
         val fileExists = file.exists()
@@ -51,22 +74,12 @@ class WebDAVHandler(private val rootDir: File) {
             val contentLength = session.headers["content-length"]?.toLongOrNull() ?: 0L
             
             // Write file directly from input stream without parsing body
-            FileOutputStream(file).use { fos ->
-                val buffer = ByteArray(8192)
-                var totalBytesRead = 0L
-                var bytesRead: Int
-                
-                while (session.inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    fos.write(buffer, 0, bytesRead)
-                    totalBytesRead += bytesRead
-                    
-                    // Break if we've read all expected content
-                    if (contentLength > 0 && totalBytesRead >= contentLength) {
-                        break
-                    }
-                }
-                fos.flush()
+            val bufferSize = runBlocking { settingsManager.bufferSize.first() }
+        session.inputStream?.use { inputStream ->
+            FileOutputStream(file).use { outputStream ->
+                inputStream.copyTo(outputStream, bufferSize)
             }
+        }
             
             // Return appropriate status code
             val status = if (fileExists) Response.Status.NO_CONTENT else Response.Status.CREATED

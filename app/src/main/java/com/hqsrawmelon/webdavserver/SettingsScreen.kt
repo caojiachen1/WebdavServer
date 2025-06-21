@@ -58,7 +58,7 @@ fun SettingsScreen(
     var networkExpanded by remember { mutableStateOf(false) }
     
     // Network diagnostics state
-    var networkStatus by remember { mutableStateOf("检查中...") }
+    var networkStatus by remember { mutableStateOf("未检查") }
     var portTestResult by remember { mutableStateOf("") }
     var isTestingNetwork by remember { mutableStateOf(false) }
     var isTestingPort by remember { mutableStateOf(false) }
@@ -510,7 +510,7 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "自动压缩响应内容（待实现）",
+                                    text = "自动压缩响应内容",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -518,7 +518,7 @@ fun SettingsScreen(
                             Switch(
                                 checked = enableCompression,
                                 onCheckedChange = settingsManager::updateEnableCompression,
-                                enabled = false
+                                enabled = !isServerRunning
                             )
                         }
                     }

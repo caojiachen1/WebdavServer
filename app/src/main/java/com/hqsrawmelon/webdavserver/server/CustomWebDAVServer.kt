@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import java.io.*
 import java.net.InetAddress
 import java.util.Date
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 class CustomWebDAVServer(
@@ -24,6 +25,8 @@ class CustomWebDAVServer(
     private val logManager = LogManager(settingsManager)
     private val failedAttempts = ConcurrentHashMap<String, AttemptTracker>()
     private val blockedIPs = ConcurrentHashMap<String, Long>()
+    private val locks = ConcurrentHashMap<String, String>() // Map to store locks
+    private val customProperties = ConcurrentHashMap<String, MutableMap<String, String>>()
     
     data class AttemptTracker(var count: Int, var lastAttempt: Long)
     
@@ -216,6 +219,8 @@ class CustomWebDAVServer(
                     "MKCOL" -> handleMkcol(uri)
                     "COPY" -> handleCopy(session, uri)
                     "MOVE" -> handleMove(session, uri)
+                    "LOCK" -> handleLock(session, uri)
+                    "UNLOCK" -> handleUnlock(session, uri)
                     else -> newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Method not allowed")
                 }
             }
@@ -310,6 +315,34 @@ class CustomWebDAVServer(
         return response
     }
 
+    private fun handleLock(session: IHTTPSession, uri: String): Response {
+        val lockToken = "urn:uuid:" + UUID.randomUUID().toString()
+        locks[uri] = lockToken
+        return newFixedLengthResponse(Response.Status.OK, "application/xml", """<?xml version=\"1.0\" encoding=\"utf-8\"?>
+            <D:prop xmlns:D=\"DAV:\">
+                <D:lockdiscovery>
+                    <D:activelock>
+                        <D:locktype><D:write/></D:locktype>
+                        <D:lockscope><D:exclusive/></D:lockscope>
+                        <D:depth>infinity</D:depth>
+                        <D:owner>${session.headers["owner"] ?: "unknown"}</D:owner>
+                        <D:timeout>Second-3600</D:timeout>
+                        <D:locktoken><D:href>$lockToken</D:href></D:locktoken>
+                    </D:activelock>
+                </D:lockdiscovery>
+            </D:prop>""")
+    }
+
+    private fun handleUnlock(session: IHTTPSession, uri: String): Response {
+        val lockToken = session.headers["Lock-Token"]?.removeSurrounding("<", ">")
+        return if (locks[uri] == lockToken) {
+            locks.remove(uri)
+            newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
+        } else {
+            newFixedLengthResponse(Response.Status.PRECONDITION_FAILED, MIME_PLAINTEXT, "Lock token does not match")
+        }
+    }
+
     private fun handlePropfind(session: IHTTPSession, uri: String): Response {
         val file = File(rootDir, uri.removePrefix("/"))
         
@@ -326,9 +359,10 @@ class CustomWebDAVServer(
     }
 
     private fun handleProppatch(uri: String): Response {
-        return newFixedLengthResponse(Response.Status.OK, "application/xml", 
-            """<?xml version="1.0" encoding="UTF-8"?>
-            <D:multistatus xmlns:D="DAV:">
+        val properties = customProperties.getOrPut(uri) { mutableMapOf() }
+        // Example: Add logic to parse and update properties from the request body
+        return newFixedLengthResponse(Response.Status.OK, "application/xml", """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+            <D:multistatus xmlns:D=\"DAV:\">
                 <D:response>
                     <D:href>$uri</D:href>
                     <D:propstat>
