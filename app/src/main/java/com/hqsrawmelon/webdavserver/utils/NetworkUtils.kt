@@ -10,7 +10,7 @@ fun getLocalIpAddress(context: Context): String {
         // Try modern approach first (API 23+)
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val activeNetwork: Network? = connectivityManager.activeNetwork
-        
+
         if (activeNetwork != null) {
             val linkProperties: LinkProperties? = connectivityManager.getLinkProperties(activeNetwork)
             linkProperties?.linkAddresses?.forEach { linkAddress ->
@@ -20,7 +20,7 @@ fun getLocalIpAddress(context: Context): String {
                 }
             }
         }
-        
+
         // Fallback to NetworkInterface approach
         val interfaces = NetworkInterface.getNetworkInterfaces()
         for (networkInterface in interfaces) {
@@ -36,6 +36,6 @@ fun getLocalIpAddress(context: Context): String {
     } catch (e: Exception) {
         e.printStackTrace()
     }
-    
+
     return "无法获取IP地址"
 }

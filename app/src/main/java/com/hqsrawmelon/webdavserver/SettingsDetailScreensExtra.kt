@@ -3,14 +3,11 @@ package com.hqsrawmelon.webdavserver
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,117 +26,119 @@ import kotlinx.coroutines.launch
 @Composable
 fun SecuritySettingsDetail(
     settingsManager: SettingsManager,
-    isServerRunning: Boolean
+    isServerRunning: Boolean,
 ) {
     val enableIpWhitelist by settingsManager.enableIpWhitelist.collectAsState()
     val ipWhitelist by settingsManager.ipWhitelist.collectAsState()
     val maxFailedAttempts by settingsManager.maxFailedAttempts.collectAsState()
     val blockDuration by settingsManager.blockDuration.collectAsState()
-    
+
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
             if (isServerRunning) {
                 Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                    colors =
+                        CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                        ),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
                             Icons.Default.Warning,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onErrorContainer
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "服务器运行时部分设置无法修改，需重启服务器生效",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer
+                            color = MaterialTheme.colorScheme.onErrorContainer,
                         )
                     }
                 }
             }
         }
-        
+
         item {
             Card(
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp)
+                    modifier = Modifier.padding(16.dp),
                 ) {
                     Text(
                         text = "IP 白名单",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
                     )
-                    
+
                     Spacer(modifier = Modifier.height(8.dp))
-                    
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "启用 IP 白名单",
                                 style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Medium,
                             )
                             Text(
                                 text = "只允许指定IP范围访问",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         Switch(
                             checked = enableIpWhitelist,
                             onCheckedChange = settingsManager::updateEnableIpWhitelist,
-                            enabled = !isServerRunning
+                            enabled = !isServerRunning,
                         )
                     }
-                    
+
                     if (enableIpWhitelist) {
                         Spacer(modifier = Modifier.height(16.dp))
-                        
+
                         OutlinedTextField(
                             value = ipWhitelist,
                             onValueChange = settingsManager::updateIpWhitelist,
                             label = { Text("IP 地址范围") },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !isServerRunning,
-                            supportingText = { Text("支持 CIDR 格式，如 192.168.1.0/24，多个范围用逗号分隔") }
+                            supportingText = { Text("支持 CIDR 格式，如 192.168.1.0/24，多个范围用逗号分隔") },
                         )
                     }
                 }
             }
         }
-        
+
         item {
             Card(
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp)
+                    modifier = Modifier.padding(16.dp),
                 ) {
                     Text(
                         text = "访问控制",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
                     )
-                    
+
                     Spacer(modifier = Modifier.height(16.dp))
-                    
+
                     OutlinedTextField(
                         value = maxFailedAttempts.toString(),
                         onValueChange = { value ->
@@ -151,11 +150,11 @@ fun SecuritySettingsDetail(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !isServerRunning,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        supportingText = { Text("1-20 次，达到后临时封禁 IP") }
+                        supportingText = { Text("1-20 次，达到后临时封禁 IP") },
                     )
-                    
+
                     Spacer(modifier = Modifier.height(16.dp))
-                    
+
                     OutlinedTextField(
                         value = blockDuration.toString(),
                         onValueChange = { value ->
@@ -167,33 +166,34 @@ fun SecuritySettingsDetail(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !isServerRunning,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        supportingText = { Text("60-3600 秒，推荐 300 秒") }
+                        supportingText = { Text("60-3600 秒，推荐 300 秒") },
                     )
                 }
             }
         }
-        
+
         item {
             Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
-                ),
-                modifier = Modifier.fillMaxWidth()
+                colors =
+                    CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    ),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp)
+                    modifier = Modifier.padding(16.dp),
                 ) {
                     Text(
                         text = "安全说明",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "• IP白名单可以限制访问来源，提高安全性\n• 失败尝试保护可以防止暴力破解\n• 封禁时间过长可能影响正常用户访问\n• 建议根据网络环境调整安全策略",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                 }
             }
@@ -206,98 +206,97 @@ fun SecuritySettingsDetail(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LoggingSettingsDetail(
-    settingsManager: SettingsManager
-) {
+fun LoggingSettingsDetail(settingsManager: SettingsManager) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val logManager = remember { LogManager(context) }
     val snackbarHostState = remember { SnackbarHostState() }
-    
+
     val enableLogging by settingsManager.enableLogging.collectAsState()
     val logLevel by settingsManager.logLevel.collectAsState()
     val maxLogSize by settingsManager.maxLogSize.collectAsState()
-    
+
     // Log viewing state
     var showLogDialog by remember { mutableStateOf(false) }
     var logContent by remember { mutableStateOf("") }
     var isLoadingLogs by remember { mutableStateOf(false) }
     var logSize by remember { mutableStateOf("0B") }
-    
+
     // Load log size on composition
     LaunchedEffect(Unit) {
         logSize = logManager.getLogSize()
     }
-    
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
                 Card(
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp)
+                        modifier = Modifier.padding(16.dp),
                     ) {
                         Text(
                             text = "日志记录",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
                         )
-                        
+
                         Spacer(modifier = Modifier.height(8.dp))
-                        
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "启用日志记录",
                                     style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.Medium,
                                 )
                                 Text(
                                     text = "记录服务器访问和错误信息",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                             Switch(
                                 checked = enableLogging,
-                                onCheckedChange = settingsManager::updateEnableLogging
+                                onCheckedChange = settingsManager::updateEnableLogging,
                             )
                         }
                     }
                 }
             }
-            
+
             if (enableLogging) {
                 item {
                     Card(
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(
-                            modifier = Modifier.padding(16.dp)
+                            modifier = Modifier.padding(16.dp),
                         ) {
                             Text(
                                 text = "日志配置",
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
                             )
-                            
+
                             Spacer(modifier = Modifier.height(16.dp))
-                            
+
                             var logLevelExpanded by remember { mutableStateOf(false) }
-                            
+
                             ExposedDropdownMenuBox(
                                 expanded = logLevelExpanded,
-                                onExpandedChange = { logLevelExpanded = it }
+                                onExpandedChange = { logLevelExpanded = it },
                             ) {
                                 OutlinedTextField(
                                     value = logLevel,
@@ -305,13 +304,14 @@ fun LoggingSettingsDetail(
                                     readOnly = true,
                                     label = { Text("日志级别") },
                                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = logLevelExpanded) },
-                                    modifier = Modifier
-                                        .menuAnchor()
-                                        .fillMaxWidth()
+                                    modifier =
+                                        Modifier
+                                            .menuAnchor()
+                                            .fillMaxWidth(),
                                 )
                                 ExposedDropdownMenu(
                                     expanded = logLevelExpanded,
-                                    onDismissRequest = { logLevelExpanded = false }
+                                    onDismissRequest = { logLevelExpanded = false },
                                 ) {
                                     listOf("ERROR", "WARN", "INFO", "DEBUG").forEach { levelOption ->
                                         DropdownMenuItem(
@@ -319,14 +319,14 @@ fun LoggingSettingsDetail(
                                             onClick = {
                                                 settingsManager.updateLogLevel(levelOption)
                                                 logLevelExpanded = false
-                                            }
+                                            },
                                         )
                                     }
                                 }
                             }
-                            
+
                             Spacer(modifier = Modifier.height(16.dp))
-                            
+
                             OutlinedTextField(
                                 value = maxLogSize.toString(),
                                 onValueChange = { value ->
@@ -337,41 +337,41 @@ fun LoggingSettingsDetail(
                                 label = { Text("最大日志文件大小 (MB)") },
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                supportingText = { Text("1-100 MB，超过后自动轮转") }
+                                supportingText = { Text("1-100 MB，超过后自动轮转") },
                             )
                         }
                     }
                 }
-                
+
                 item {
                     Card(
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(
-                            modifier = Modifier.padding(16.dp)
+                            modifier = Modifier.padding(16.dp),
                         ) {
                             Text(
                                 text = "日志管理",
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
                             )
-                            
+
                             Spacer(modifier = Modifier.height(16.dp))
-                            
+
                             Text(
                                 text = "当前日志大小: $logSize",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            
+
                             Spacer(modifier = Modifier.height(16.dp))
-                            
+
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 OutlinedButton(
-                                    onClick = { 
+                                    onClick = {
                                         showLogDialog = true
                                         isLoadingLogs = true
                                         scope.launch {
@@ -380,14 +380,14 @@ fun LoggingSettingsDetail(
                                             isLoadingLogs = false
                                         }
                                     },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
                                 ) {
                                     Icon(Icons.Default.Visibility, contentDescription = null)
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("查看日志")
                                 }
                                 OutlinedButton(
-                                    onClick = { 
+                                    onClick = {
                                         scope.launch {
                                             try {
                                                 logManager.clearLogs()
@@ -399,9 +399,10 @@ fun LoggingSettingsDetail(
                                         }
                                     },
                                     modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.error
-                                    )
+                                    colors =
+                                        ButtonDefaults.outlinedButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.error,
+                                        ),
                                 ) {
                                     Icon(Icons.Default.Delete, contentDescription = null)
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -412,54 +413,55 @@ fun LoggingSettingsDetail(
                     }
                 }
             }
-            
+
             item {
                 Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                    colors =
+                        CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        ),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp)
+                        modifier = Modifier.padding(16.dp),
                     ) {
                         Text(
                             text = "日志说明",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "• ERROR: 只记录错误信息\n• WARN: 记录警告和错误\n• INFO: 记录一般信息、警告和错误\n• DEBUG: 记录所有调试信息（详细）",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                         )
                     }
                 }
             }
         }
-        
+
         SnackbarHost(
             hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
-    
+
     // Log viewing dialog
     if (showLogDialog) {
         AlertDialog(
             onDismissRequest = { showLogDialog = false },
-            title = { 
+            title = {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("服务器日志")
                     Spacer(modifier = Modifier.weight(1f))
                     Text(
                         text = logSize,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             },
@@ -467,7 +469,7 @@ fun LoggingSettingsDetail(
                 if (isLoadingLogs) {
                     Box(
                         contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         CircularProgressIndicator()
                     }
@@ -476,14 +478,14 @@ fun LoggingSettingsDetail(
                         Text(
                             text = if (logContent.isEmpty()) "暂无日志内容" else logContent,
                             style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
             },
             confirmButton = {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     TextButton(onClick = { showLogDialog = false }) {
                         Text("关闭")
@@ -496,12 +498,12 @@ fun LoggingSettingsDetail(
                                 logSize = logManager.getLogSize()
                                 isLoadingLogs = false
                             }
-                        }
+                        },
                     ) {
                         Text("刷新")
                     }
                 }
-            }
+            },
         )
     }
 }
@@ -513,100 +515,105 @@ fun LoggingSettingsDetail(
 @Composable
 fun NetworkDiagnosticsDetail(
     networkDiagnostics: NetworkDiagnostics,
-    onRequestLocationPermission: () -> Unit = {}
+    onRequestLocationPermission: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    
+
     // Network diagnostics state
     var networkStatus by remember { mutableStateOf("未检查") }
     var portTestResult by remember { mutableStateOf("") }
     var isTestingNetwork by remember { mutableStateOf(false) }
     var isTestingPort by remember { mutableStateOf(false) }
-    
+
     // Permission status check with real-time updates
     var hasLocationPermission by remember { mutableStateOf(false) }
-    
+
     LaunchedEffect(Unit) {
-        hasLocationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            androidx.core.content.ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED ||
-            androidx.core.content.ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
+        hasLocationPermission =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                ) == PackageManager.PERMISSION_GRANTED ||
+                    androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                    ) == PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
     }
-    
+
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (!hasLocationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             item {
                 Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                    colors =
+                        CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                        ),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp)
+                        modifier = Modifier.padding(16.dp),
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
                                 Icons.Default.Warning,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onErrorContainer
+                                tint = MaterialTheme.colorScheme.onErrorContainer,
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "需要位置权限以显示WiFi详细信息",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
                             )
                         }
-                        
+
                         Spacer(modifier = Modifier.height(12.dp))
-                        
+
                         Text(
                             text = "Android系统要求应用获得位置权限才能访问WiFi网络名称(SSID)。这有助于更准确地显示网络连接状态。",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer
+                            color = MaterialTheme.colorScheme.onErrorContainer,
                         )
-                        
+
                         Spacer(modifier = Modifier.height(16.dp))
-                        
+
                         Button(
                             onClick = {
                                 onRequestLocationPermission()
                                 // Refresh permission status after request
                                 scope.launch {
                                     kotlinx.coroutines.delay(500)
-                                    hasLocationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                        androidx.core.content.ContextCompat.checkSelfPermission(
-                                            context,
-                                            Manifest.permission.ACCESS_FINE_LOCATION
-                                        ) == PackageManager.PERMISSION_GRANTED
-                                    } else {
-                                        true
-                                    }
+                                    hasLocationPermission =
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                            androidx.core.content.ContextCompat.checkSelfPermission(
+                                                context,
+                                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                        } else {
+                                            true
+                                        }
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.onErrorContainer,
-                                contentColor = MaterialTheme.colorScheme.errorContainer
-                            ),
-                            modifier = Modifier.fillMaxWidth()
+                            colors =
+                                ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.onErrorContainer,
+                                    contentColor = MaterialTheme.colorScheme.errorContainer,
+                                ),
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Default.LocationOn, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -616,66 +623,70 @@ fun NetworkDiagnosticsDetail(
                 }
             }
         }
-        
+
         item {
             Card(
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp)
+                    modifier = Modifier.padding(16.dp),
                 ) {
                     Text(
                         text = "网络状态",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
                     )
-                    
+
                     Spacer(modifier = Modifier.height(16.dp))
-                    
+
                     Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            ),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(
-                            modifier = Modifier.padding(16.dp)
+                            modifier = Modifier.padding(16.dp),
                         ) {
                             Text(
                                 text = "网络状态: $networkStatus",
                                 style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Medium,
                             )
                             if (portTestResult.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = "端口测试: $portTestResult",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            
+
                             // Show permission status
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = "位置权限: ${if (hasLocationPermission) "已授权" else "未授权"}",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = if (hasLocationPermission) 
-                                        MaterialTheme.colorScheme.primary 
-                                    else 
-                                        MaterialTheme.colorScheme.error
+                                    color =
+                                        if (hasLocationPermission) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.error
+                                        },
                                 )
                             }
                         }
                     }
-                    
+
                     Spacer(modifier = Modifier.height(16.dp))
-                    
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {                        OutlinedButton(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
                             onClick = {
                                 if (!isTestingNetwork) {
                                     isTestingNetwork = true
@@ -691,13 +702,14 @@ fun NetworkDiagnosticsDetail(
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            enabled = !isTestingNetwork
+                            enabled = !isTestingNetwork,
                         ) {
                             if (isTestingNetwork) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
-                                )                            } else {
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
                                 Icon(Icons.Default.Refresh, contentDescription = null)
                             }
                             Spacer(modifier = Modifier.width(8.dp))
@@ -719,12 +731,12 @@ fun NetworkDiagnosticsDetail(
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            enabled = !isTestingPort
+                            enabled = !isTestingPort,
                         ) {
                             if (isTestingPort) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
+                                    strokeWidth = 2.dp,
                                 )
                             } else {
                                 Icon(Icons.Default.NetworkPing, contentDescription = null)
@@ -736,30 +748,31 @@ fun NetworkDiagnosticsDetail(
                 }
             }
         }
-        
+
         item {
             Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
-                ),
-                modifier = Modifier.fillMaxWidth()
+                colors =
+                    CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    ),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp)
+                    modifier = Modifier.padding(16.dp),
                 ) {
                     Text(
                         text = "网络访问提示",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
-                    
+
                     Spacer(modifier = Modifier.height(8.dp))
-                    
+
                     Text(
                         text = "• 确保设备连接到 WiFi 网络\n• 客户端需与服务器在同一网络\n• 防火墙可能阻止连接\n• 某些路由器可能限制设备间通信\n• 尝试禁用设备的省电模式\n• 检查路由器的 AP 隔离设置",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                 }
             }

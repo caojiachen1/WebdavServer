@@ -1,7 +1,6 @@
 package com.hqsrawmelon.webdavserver.server
 
 import com.hqsrawmelon.webdavserver.*
-import com.hqsrawmelon.webdavserver.utils.WebDAVUtils
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -14,15 +13,18 @@ class CustomWebDAVServer(
     private val username: String,
     private val password: String,
     private val allowAnonymous: Boolean = false,
-    private val settingsManager: SettingsManager
+    private val settingsManager: SettingsManager,
 ) : NanoHTTPD(port) {
     private val logManager = LogManager(settingsManager)
     private val failedAttempts = ConcurrentHashMap<String, AttemptTracker>()
     private val blockedIPs = ConcurrentHashMap<String, Long>()
     private val webdavHandler = WebDAVHandler(rootDir, settingsManager, logManager)
 
-    data class AttemptTracker(var count: Int, var lastAttempt: Long)
-    
+    data class AttemptTracker(
+        var count: Int,
+        var lastAttempt: Long,
+    )
+
     init {
         if (!rootDir.exists()) {
             rootDir.mkdirs()
@@ -33,11 +35,11 @@ class CustomWebDAVServer(
     override fun serve(session: IHTTPSession): Response {
         val clientIP = webdavHandler.getClientIP(session)
         val enableLogging = runBlocking { settingsManager.enableLogging.first() }
-        
+
         if (enableLogging) {
-            logManager.logInfo("Request", "Client ${clientIP} accessing ${session.uri}")
+            logManager.logInfo("Request", "Client $clientIP accessing ${session.uri}")
         }
-        
+
         // Check if IP is blocked
         if (webdavHandler.isIPBlocked(clientIP)) {
             if (enableLogging) {
@@ -45,7 +47,7 @@ class CustomWebDAVServer(
             }
             return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "IP blocked due to repeated failed attempts")
         }
-        
+
         // Check IP whitelist if enabled
         if (!webdavHandler.isIPAllowed(clientIP)) {
             if (enableLogging) {
@@ -53,18 +55,21 @@ class CustomWebDAVServer(
             }
             return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "IP not allowed")
         }
-        
+
         try {
             val response = handleRequest(session, clientIP)
-            
+
             // Add CORS headers if enabled
             val enableCors = runBlocking { settingsManager.enableCors.first() }
             if (enableCors) {
                 response.addHeader("Access-Control-Allow-Origin", "*")
-                response.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE")
+                response.addHeader(
+                    "Access-Control-Allow-Methods",
+                    "GET, POST, PUT, DELETE, OPTIONS, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE",
+                )
                 response.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Depth, Destination")
             }
-            
+
             return response
         } catch (e: Exception) {
             if (enableLogging) {
@@ -77,22 +82,25 @@ class CustomWebDAVServer(
     private fun recordFailedAttempt(clientIP: String) {
         val maxFailedAttempts = runBlocking { settingsManager.maxFailedAttempts.first() }
         val currentTime = System.currentTimeMillis()
-        
+
         val tracker = failedAttempts.getOrPut(clientIP) { AttemptTracker(0, currentTime) }
         tracker.count++
         tracker.lastAttempt = currentTime
-        
+
         if (tracker.count >= maxFailedAttempts) {
             blockedIPs[clientIP] = currentTime
             logManager.logWarn("Security", "IP $clientIP blocked after $maxFailedAttempts failed attempts")
         }
     }
-    
-    private fun handleRequest(session: IHTTPSession, clientIP: String): Response {
+
+    private fun handleRequest(
+        session: IHTTPSession,
+        clientIP: String,
+    ): Response {
         val method = session.method
         val uri = session.uri
         val enableLogging = runBlocking { settingsManager.enableLogging.first() }
-        
+
         // Handle authentication if not anonymous
         if (!allowAnonymous) {
             val authHeader = session.headers["authorization"]
@@ -112,7 +120,7 @@ class CustomWebDAVServer(
                 }
             }
         }
-        
+
         return when (method) {
             Method.GET -> webdavHandler.handleGet(session, uri)
             Method.PUT -> webdavHandler.handlePut(session, uri)

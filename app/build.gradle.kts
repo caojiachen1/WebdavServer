@@ -25,7 +25,7 @@ android {
             val keystorePassword = System.getenv("SIGNING_KEYSTORE_PASSWORD")
             val keyAlias = System.getenv("SIGNING_KEY_ALIAS")
             val keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
-            
+
             storeFile = file(keystorePath)
             storeType = "PKCS12"
             storePassword = keystorePassword
@@ -42,7 +42,7 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             // 使用默认的debug签名配置
-            
+
             // 启用日志输出
             buildConfigField("boolean", "DEBUG_MODE", "true")
         }
@@ -53,9 +53,9 @@ android {
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro",
             )
-            
+
             // 禁用日志输出
             buildConfigField("boolean", "DEBUG_MODE", "false")
         }
@@ -86,7 +86,7 @@ dependencies {
     implementation(libs.androidx.material)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.nanohttpd.webserver)
-    
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
