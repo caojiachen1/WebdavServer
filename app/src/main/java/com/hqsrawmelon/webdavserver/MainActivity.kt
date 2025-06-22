@@ -21,6 +21,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import androidx.navigation.NavController
+import androidx.navigation.compose.*
 import com.hqsrawmelon.webdavserver.server.CustomWebDAVServer
 import com.hqsrawmelon.webdavserver.ui.theme.WebdavServerTheme
 import com.hqsrawmelon.webdavserver.utils.*
@@ -142,6 +144,24 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
     @Composable
     fun MainApp() {
+        val navController = rememberNavController()
+
+        NavHost(
+            navController = navController,
+            startDestination = "main_screen",
+            modifier = Modifier.fillMaxSize()
+        ) {
+            composable("main_screen") {
+                MainScreen()
+            }
+            composable("details_screen") {
+                DetailsScreen(navController)
+            }
+        }
+    }
+
+    @Composable
+    fun MainScreen() {
         val pagerState = rememberPagerState(pageCount = { 3 })
         val webdavRootDir = remember { File(getExternalFilesDir(null), "webdav") }
         val scope = rememberCoroutineScope()
@@ -155,8 +175,7 @@ class MainActivity : ComponentActivity() {
         val password by settingsManager.password.collectAsState()
         val serverPort by settingsManager.serverPort.collectAsState()
         val allowAnonymous by settingsManager.allowAnonymous.collectAsState()
-        val enableHttps by settingsManager.enableHttps.collectAsState()
-
+        
         // File manager state for navigation
         var currentDirectory by remember { mutableStateOf(webdavRootDir) }
         var refreshTrigger by remember { mutableStateOf(0) }
@@ -665,5 +684,19 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopServer()
+    }
+
+    @Composable
+    fun DetailsScreen(navController: NavController) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Details Screen")
+            Button(onClick = { navController.popBackStack() }) {
+                Text("Go Back")
+            }
+        }
     }
 }
