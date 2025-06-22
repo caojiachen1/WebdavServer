@@ -27,7 +27,8 @@ class CustomWebDAVServer(
     private val blockedIPs = ConcurrentHashMap<String, Long>()
     private val locks = ConcurrentHashMap<String, String>() // Map to store locks
     private val customProperties = ConcurrentHashMap<String, MutableMap<String, String>>()
-    
+    private val webdavHandler = WebDAVHandler(rootDir, settingsManager, logManager)
+
     data class AttemptTracker(var count: Int, var lastAttempt: Long)
     
     init {
