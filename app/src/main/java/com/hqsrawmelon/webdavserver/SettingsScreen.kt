@@ -36,36 +36,37 @@ fun SettingsScreen(
     // Navigation state
     var currentScreen by remember { mutableStateOf<String?>(null) }
     
-    if (currentScreen == null) {
-        // Main settings list
-        SettingsMainScreen(
-            onNavigateToDetail = { settingId -> currentScreen = settingId },
-            settingsManager = settingsManager
-        )
-    } else {
-        // Detail screen with back navigation
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // Top bar with back button
-            TopAppBar(
-                title = { 
-                    Text(
-                        text = SettingsItems.getAllItems().find { it.id == currentScreen }?.title ?: "设置详情",
-                        fontWeight = FontWeight.Bold
-                    ) 
-                },
-                navigationIcon = {
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // Top bar - always present
+        TopAppBar(
+            title = { 
+                Text(
+                    text = if (currentScreen == null) "设置" else 
+                        (SettingsItems.getAllItems().find { it.id == currentScreen }?.title ?: "设置详情"),
+                    fontWeight = FontWeight.Bold
+                ) 
+            },
+            navigationIcon = {
+                if (currentScreen != null) {
                     IconButton(onClick = { currentScreen = null }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                )
+                }
+            },            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface
             )
-            
+        )
+        
+        if (currentScreen == null) {
+            // Main settings list
+            SettingsMainScreen(
+                onNavigateToDetail = { settingId -> currentScreen = settingId },
+                settingsManager = settingsManager
+            )
+        } else {
             // Detail content
             when (currentScreen) {
                 SettingsItems.AUTHENTICATION.id -> AuthenticationSettingsDetail(
@@ -117,16 +118,6 @@ fun SettingsMainScreen(
         contentPadding = PaddingValues(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Header
-        item {
-            Text(
-                text = "设置",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 16.dp)
-            )
-        }
-        
         // Settings items
         items(settingsItems.size) { index ->
             val item = settingsItems[index]

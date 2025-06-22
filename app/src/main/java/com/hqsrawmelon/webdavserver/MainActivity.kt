@@ -226,21 +226,9 @@ class MainActivity : ComponentActivity() {
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer                        )
                     )
-                    2 -> TopAppBar(
-                        title = { 
-                            Text(
-                                "设置",
-                                fontWeight = FontWeight.Bold
-                            ) 
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
+                    2 -> {} // Settings screen manages its own TopAppBar
                 }
             },
             bottomBar = {
