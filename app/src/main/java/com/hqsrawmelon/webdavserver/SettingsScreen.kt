@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.*
 import androidx.activity.result.contract.*
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
@@ -25,7 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
 fun SettingsScreen(
     settingsManager: SettingsManager,
@@ -35,8 +37,7 @@ fun SettingsScreen(
 ) {
     // Navigation state
     var currentScreen by remember { mutableStateOf<String?>(null) }
-    
-    Column(
+      Column(
         modifier = Modifier.fillMaxSize()
     ) {
         // Top bar - always present
@@ -59,43 +60,68 @@ fun SettingsScreen(
                 titleContentColor = MaterialTheme.colorScheme.onSurface
             )
         )
-        
-        if (currentScreen == null) {
-            // Main settings list
-            SettingsMainScreen(
-                onNavigateToDetail = { settingId -> currentScreen = settingId },
-                settingsManager = settingsManager
-            )
-        } else {
-            // Detail content
-            when (currentScreen) {
-                SettingsItems.AUTHENTICATION.id -> AuthenticationSettingsDetail(
-                    settingsManager = settingsManager,
-                    isServerRunning = isServerRunning
-                )
-                SettingsItems.SERVER_CONFIG.id -> ServerConfigDetail(
-                    settingsManager = settingsManager,
-                    isServerRunning = isServerRunning
-                )
-                SettingsItems.ADVANCED.id -> AdvancedSettingsDetail(
-                    settingsManager = settingsManager,
-                    isServerRunning = isServerRunning
-                )
-                SettingsItems.SECURITY.id -> SecuritySettingsDetail(
-                    settingsManager = settingsManager,
-                    isServerRunning = isServerRunning
-                )
-                SettingsItems.LOGGING.id -> LoggingSettingsDetail(
+          AnimatedContent(
+            targetState = currentScreen,
+            transitionSpec = {
+                if (targetState == null) {
+                    // Going back to main screen
+                    slideInHorizontally(
+                        initialOffsetX = { -it },
+                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                    ) togetherWith slideOutHorizontally(
+                        targetOffsetX = { it },
+                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                    )
+                } else {
+                    // Going to detail screen
+                    slideInHorizontally(
+                        initialOffsetX = { it },
+                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                    ) togetherWith slideOutHorizontally(
+                        targetOffsetX = { -it },
+                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                    )
+                }
+            },
+            label = "settings_navigation"
+        ) { screen ->
+            if (screen == null) {
+                // Main settings list
+                SettingsMainScreen(
+                    onNavigateToDetail = { settingId -> currentScreen = settingId },
                     settingsManager = settingsManager
                 )
-                SettingsItems.NETWORK_DIAGNOSTICS.id -> NetworkDiagnosticsDetail(
-                    networkDiagnostics = networkDiagnostics,
-                    onRequestLocationPermission = onRequestLocationPermission
-                )
-                SettingsItems.BACKUP_TOOLS.id -> BackupToolsDetail(
-                    settingsManager = settingsManager
-                )
-                SettingsItems.ABOUT.id -> AboutDetail()
+            } else {
+                // Detail content
+                when (screen) {
+                    SettingsItems.AUTHENTICATION.id -> AuthenticationSettingsDetail(
+                        settingsManager = settingsManager,
+                        isServerRunning = isServerRunning
+                    )
+                    SettingsItems.SERVER_CONFIG.id -> ServerConfigDetail(
+                        settingsManager = settingsManager,
+                        isServerRunning = isServerRunning
+                    )
+                    SettingsItems.ADVANCED.id -> AdvancedSettingsDetail(
+                        settingsManager = settingsManager,
+                        isServerRunning = isServerRunning
+                    )
+                    SettingsItems.SECURITY.id -> SecuritySettingsDetail(
+                        settingsManager = settingsManager,
+                        isServerRunning = isServerRunning
+                    )
+                    SettingsItems.LOGGING.id -> LoggingSettingsDetail(
+                        settingsManager = settingsManager
+                    )
+                    SettingsItems.NETWORK_DIAGNOSTICS.id -> NetworkDiagnosticsDetail(
+                        networkDiagnostics = networkDiagnostics,
+                        onRequestLocationPermission = onRequestLocationPermission
+                    )
+                    SettingsItems.BACKUP_TOOLS.id -> BackupToolsDetail(
+                        settingsManager = settingsManager
+                    )
+                    SettingsItems.ABOUT.id -> AboutDetail()
+                }
             }
         }
     }
@@ -144,7 +170,7 @@ fun SettingsMainScreen(
 /**
  * 设置项卡片组件
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
 fun SettingsItemCard(
     item: SettingsItem,

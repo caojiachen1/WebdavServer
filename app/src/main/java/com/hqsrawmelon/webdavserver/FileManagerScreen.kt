@@ -2,11 +2,14 @@ package com.hqsrawmelon.webdavserver
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.pullrefresh.*
 import androidx.compose.material3.*
@@ -30,7 +33,7 @@ data class FileItem(
     val lastModified: Long = file.lastModified()
 )
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class, ExperimentalAnimationApi::class)
 @Composable
 fun FileManagerScreen(
     rootDir: File,
@@ -120,18 +123,68 @@ fun FileManagerScreen(
             }
         }
     }
-    
-    LaunchedEffect(currentDirectory, refreshTrigger) {
+      LaunchedEffect(currentDirectory, refreshTrigger) {
         // Always reload files when directory changes or refresh is triggered
         files = loadFiles(currentDirectory)
     }
-    
-    // Main content with pull-to-refresh
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pullRefresh(pullRefreshState)
-    ) {
+
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {        // Top bar - always present
+        TopAppBar(
+            title = {                AnimatedContent(
+                    targetState = currentDirectory.name,
+                    transitionSpec = {                        slideInVertically(
+                            initialOffsetY = { it },
+                            animationSpec = tween(200, easing = FastOutSlowInEasing)
+                        ) togetherWith slideOutVertically(
+                            targetOffsetY = { -it },
+                            animationSpec = tween(200, easing = FastOutSlowInEasing)
+                        )
+                    },
+                    label = "directory_title"
+                ) { directoryName ->
+                    Text(
+                        text = "文件管理 - $directoryName",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            navigationIcon = {                AnimatedVisibility(
+                    visible = currentDirectory != rootDir,
+                    enter = slideInHorizontally(
+                        initialOffsetX = { -it },
+                        animationSpec = tween(250, easing = FastOutSlowInEasing)
+                    ) + fadeIn(animationSpec = tween(250)),
+                    exit = slideOutHorizontally(
+                        targetOffsetX = { -it },
+                        animationSpec = tween(250, easing = FastOutSlowInEasing)
+                    ) + fadeOut(animationSpec = tween(250))
+                ) {
+                    IconButton(onClick = { 
+                        onDirectoryChange(currentDirectory.parentFile ?: rootDir)
+                    }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回上级")
+                    }
+                }
+            },
+            actions = {
+                IconButton(onClick = { filePickerLauncher.launch("*/*") }) {
+                    Icon(Icons.Default.CloudUpload, contentDescription = "上传文件")
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface
+            )
+        )
+
+        // Main content with pull-to-refresh
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pullRefresh(pullRefreshState)
+        ) {
         if (files.isEmpty() && !isRefreshing) {
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -264,19 +317,19 @@ fun FileManagerScreen(
                 showDetailsDialog = false
                 selectedFile = null
             }
-        )
-    }
-    
-    // Upload progress dialog
-    if (showUploadDialog && isUploading) {
-        UploadProgressDialog(
-            fileName = uploadFileName,
-            progress = uploadProgress,
-            onCancel = {
-                // TODO: Implement upload cancellation if needed
-                showUploadDialog = false
-            }
-        )
+        )        }
+
+        // Upload progress dialog
+        if (showUploadDialog && isUploading) {
+            UploadProgressDialog(
+                fileName = uploadFileName,
+                progress = uploadProgress,
+                onCancel = {
+                    // TODO: Implement upload cancellation if needed
+                    showUploadDialog = false
+                }
+            )
+        }
     }
 }
 
@@ -305,7 +358,7 @@ fun FileItemCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = if (fileItem.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile,
+                imageVector = if (fileItem.isDirectory) Icons.Default.Folder else Icons.Default.Description,
                 contentDescription = null,
                 modifier = Modifier.size(40.dp),
                 tint = if (fileItem.isDirectory) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface

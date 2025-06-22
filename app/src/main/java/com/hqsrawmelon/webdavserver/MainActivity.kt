@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.*
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.*
 import androidx.compose.material.icons.Icons
@@ -129,8 +131,7 @@ class MainActivity : ComponentActivity() {
         
         requestPermissionLauncher.launch(permissions)
     }
-    
-    @OptIn(ExperimentalMaterial3Api::class)
+      @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
     @Composable
     fun MainApp() {
         val pagerState = rememberPagerState(pageCount = { 3 })
@@ -186,62 +187,41 @@ class MainActivity : ComponentActivity() {
                 webdavRootDir.mkdirs()
             }
         }
-        
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            topBar = {
-                when (pagerState.currentPage) {
-                    0 -> TopAppBar(
-                        title = { 
-                            Text(
-                                "WebDAV 服务器",
-                                fontWeight = FontWeight.Bold
-                            ) 
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
-                    1 -> TopAppBar(
-                        title = { 
-                            Text(
-                                "文件管理 - ${currentDirectory.name}",
-                                fontWeight = FontWeight.Bold
-                            ) 
-                        },
-                        navigationIcon = {
-                            if (currentDirectory != webdavRootDir) {
-                                IconButton(onClick = { 
-                                    currentDirectory = currentDirectory.parentFile ?: webdavRootDir
-                                }) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回上级")
-                                }
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { filePickerLauncher.launch("*/*") }) {
-                                Icon(Icons.Default.CloudUpload, contentDescription = "上传文件")
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer                        )
-                    )
-                    2 -> {} // Settings screen manages its own TopAppBar
-                }
-            },
-            bottomBar = {
-                NavigationBar {
+          Scaffold(
+            modifier = Modifier.fillMaxSize(),            bottomBar = {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ) {
                     NavigationBarItem(
                         selected = pagerState.currentPage == 0,
                         onClick = { 
                             scope.launch {
                                 pagerState.animateScrollToPage(0)
                             }
+                        },                        icon = {                            AnimatedContent(
+                                targetState = pagerState.currentPage == 0,
+                                transitionSpec = {
+                                    scaleIn(animationSpec = tween(200)) togetherWith scaleOut(animationSpec = tween(200))
+                                },
+                                label = "server_icon"
+                            ) { isSelected ->
+                                Icon(
+                                    if (isSelected) Icons.Default.PlayArrow else Icons.Default.PlayArrow, 
+                                    contentDescription = null,
+                                    modifier = Modifier.size(if (isSelected) 28.dp else 24.dp)
+                                )
+                            }
                         },
-                        icon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-                        label = { Text("服务器") }
+                        label = { 
+                            Text(
+                                "服务器",
+                                style = if (pagerState.currentPage == 0) 
+                                    MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                else 
+                                    MaterialTheme.typography.labelMedium
+                            )
+                        }
                     )
                     NavigationBarItem(
                         selected = pagerState.currentPage == 1,
@@ -249,9 +229,29 @@ class MainActivity : ComponentActivity() {
                             scope.launch {
                                 pagerState.animateScrollToPage(1)
                             }
+                        },                        icon = {                            AnimatedContent(
+                                targetState = pagerState.currentPage == 1,
+                                transitionSpec = {
+                                    scaleIn(animationSpec = tween(200)) togetherWith scaleOut(animationSpec = tween(200))
+                                },
+                                label = "file_icon"
+                            ) { isSelected ->
+                                Icon(
+                                    if (isSelected) Icons.Default.Folder else Icons.Default.FolderOpen, 
+                                    contentDescription = null,
+                                    modifier = Modifier.size(if (isSelected) 28.dp else 24.dp)
+                                )
+                            }
                         },
-                        icon = { Icon(Icons.Default.Folder, contentDescription = null) },
-                        label = { Text("文件管理") }
+                        label = { 
+                            Text(
+                                "文件管理",
+                                style = if (pagerState.currentPage == 1) 
+                                    MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                else 
+                                    MaterialTheme.typography.labelMedium
+                            )
+                        }
                     )
                     NavigationBarItem(
                         selected = pagerState.currentPage == 2,
@@ -259,20 +259,50 @@ class MainActivity : ComponentActivity() {
                             scope.launch {
                                 pagerState.animateScrollToPage(2)
                             }
+                        },                        icon = {                            AnimatedContent(
+                                targetState = pagerState.currentPage == 2,
+                                transitionSpec = {
+                                    scaleIn(animationSpec = tween(200)) togetherWith scaleOut(animationSpec = tween(200))
+                                },
+                                label = "settings_icon"
+                            ) { isSelected ->
+                                Icon(
+                                    if (isSelected) Icons.Default.Settings else Icons.Default.Settings, 
+                                    contentDescription = null,
+                                    modifier = Modifier.size(if (isSelected) 28.dp else 24.dp)
+                                )
+                            }
                         },
-                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                        label = { Text("设置") }
+                        label = { 
+                            Text(
+                                "设置",
+                                style = if (pagerState.currentPage == 2) 
+                                    MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                else 
+                                    MaterialTheme.typography.labelMedium
+                            )
+                        }
                     )
                 }
-            }
-        ) { innerPadding ->
+            }) { innerPadding ->
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
-            ) { page ->
-                when (page) {
+                    .padding(innerPadding),
+                userScrollEnabled = true
+            ) { page ->                AnimatedContent(
+                    targetState = page,
+                    transitionSpec = {                        slideInHorizontally(
+                            initialOffsetX = { if (targetState > initialState) it else -it },
+                            animationSpec = tween(300, easing = FastOutSlowInEasing)
+                        ) togetherWith slideOutHorizontally(
+                            targetOffsetX = { if (targetState > initialState) -it else it },
+                            animationSpec = tween(300, easing = FastOutSlowInEasing)
+                        )
+                    },                    label = "page_transition"
+                ) { currentPage ->
+                when (currentPage) {
                     0 -> WebDAVServerApp(
                         isServerRunning = isServerRunning,
                         onServerRunningChange = { isServerRunning = it },
@@ -305,11 +335,10 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 }
+                }
             }
         }
-    }
-    
-    @OptIn(ExperimentalMaterial3Api::class)
+    }      @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
     @Composable
     fun WebDAVServerApp(
         isServerRunning: Boolean,
@@ -329,12 +358,29 @@ class MainActivity : ComponentActivity() {
         }
         
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+            modifier = Modifier.fillMaxSize()
         ) {
+            // Top bar - always present
+            TopAppBar(
+                title = { 
+                    Text(
+                        text = "WebDAV 服务器",
+                        fontWeight = FontWeight.Bold
+                    ) 
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                )
+            )
+            
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
             // Server Status Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -491,9 +537,9 @@ class MainActivity : ComponentActivity() {
                                   "4. 使用WebDAV客户端连接",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                        )                    }
                 }
+            }
             }
         }
     }
