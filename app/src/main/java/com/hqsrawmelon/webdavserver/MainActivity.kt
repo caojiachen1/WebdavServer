@@ -131,7 +131,7 @@ class MainActivity : ComponentActivity() {
         
         requestPermissionLauncher.launch(permissions)
     }
-      @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
+    @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
     @Composable
     fun MainApp() {
         val pagerState = rememberPagerState(pageCount = { 3 })
@@ -199,7 +199,9 @@ class MainActivity : ComponentActivity() {
                             scope.launch {
                                 pagerState.animateScrollToPage(0)
                             }
-                        },                        icon = {                            AnimatedContent(
+                        },                        
+                        icon = {                            
+                            AnimatedContent(
                                 targetState = pagerState.currentPage == 0,
                                 transitionSpec = {
                                     scaleIn(animationSpec = tween(200)) togetherWith scaleOut(animationSpec = tween(200))
@@ -229,7 +231,9 @@ class MainActivity : ComponentActivity() {
                             scope.launch {
                                 pagerState.animateScrollToPage(1)
                             }
-                        },                        icon = {                            AnimatedContent(
+                        },                        
+                        icon = {                            
+                            AnimatedContent(
                                 targetState = pagerState.currentPage == 1,
                                 transitionSpec = {
                                     scaleIn(animationSpec = tween(200)) togetherWith scaleOut(animationSpec = tween(200))
@@ -259,7 +263,9 @@ class MainActivity : ComponentActivity() {
                             scope.launch {
                                 pagerState.animateScrollToPage(2)
                             }
-                        },                        icon = {                            AnimatedContent(
+                        },                        
+                        icon = {                            
+                            AnimatedContent(
                                 targetState = pagerState.currentPage == 2,
                                 transitionSpec = {
                                     scaleIn(animationSpec = tween(200)) togetherWith scaleOut(animationSpec = tween(200))
@@ -291,16 +297,19 @@ class MainActivity : ComponentActivity() {
                     .fillMaxSize()
                     .padding(innerPadding),
                 userScrollEnabled = true
-            ) { page ->                AnimatedContent(
+            ) { page ->                
+                AnimatedContent(
                     targetState = page,
-                    transitionSpec = {                        slideInHorizontally(
+                    transitionSpec = {                        
+                        slideInHorizontally(
                             initialOffsetX = { if (targetState > initialState) it else -it },
                             animationSpec = tween(300, easing = FastOutSlowInEasing)
                         ) togetherWith slideOutHorizontally(
                             targetOffsetX = { if (targetState > initialState) -it else it },
                             animationSpec = tween(300, easing = FastOutSlowInEasing)
                         )
-                    },                    label = "page_transition"
+                    },                    
+                    label = "page_transition"
                 ) { currentPage ->
                 when (currentPage) {
                     0 -> WebDAVServerApp(
@@ -338,7 +347,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }      @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
+    }      
+    
+    @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
     @Composable
     fun WebDAVServerApp(
         isServerRunning: Boolean,

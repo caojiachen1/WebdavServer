@@ -20,3 +20,6 @@ local.properties
 
 *.kotlin_module
 *.kotlin_builtins
+
+ktlint
+*.md
