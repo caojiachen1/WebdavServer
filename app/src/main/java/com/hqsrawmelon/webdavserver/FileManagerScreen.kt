@@ -132,9 +132,11 @@ fun FileManagerScreen(
         modifier = Modifier.fillMaxSize()
     ) {        // Top bar - always present
         TopAppBar(
-            title = {                AnimatedContent(
+            title = {
+                AnimatedContent(
                     targetState = currentDirectory.name,
-                    transitionSpec = {                        slideInVertically(
+                    transitionSpec = {
+                        slideInVertically(
                             initialOffsetY = { it },
                             animationSpec = tween(200, easing = FastOutSlowInEasing)
                         ) togetherWith slideOutVertically(
@@ -150,7 +152,8 @@ fun FileManagerScreen(
                     )
                 }
             },
-            navigationIcon = {                AnimatedVisibility(
+            navigationIcon = {
+                AnimatedVisibility(
                     visible = currentDirectory != rootDir,
                     enter = slideInHorizontally(
                         initialOffsetX = { -it },
