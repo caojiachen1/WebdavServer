@@ -8,8 +8,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.*
 import java.net.InetAddress
-import java.util.Date
-import java.util.UUID
+import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
 class CustomWebDAVServer(
@@ -208,20 +207,20 @@ class CustomWebDAVServer(
         }
         
         return when (method) {
-            Method.GET -> handleGet(uri)
-            Method.PUT -> handlePut(session, uri)
-            Method.DELETE -> handleDelete(uri)
-            Method.OPTIONS -> handleOptions()
+            Method.GET -> webdavHandler.handleGet(session, uri)
+            Method.PUT -> webdavHandler.handlePut(session, uri)
+            Method.DELETE -> webdavHandler.handleDelete(session, uri)
+            Method.OPTIONS -> webdavHandler.handleOptions(settingsManager)
             else -> {
                 // Handle WebDAV methods
                 when (session.headers["method"] ?: method.name) {
-                    "PROPFIND" -> handlePropfind(session, uri)
-                    "PROPPATCH" -> handleProppatch(uri)
-                    "MKCOL" -> handleMkcol(uri)
-                    "COPY" -> handleCopy(session, uri)
-                    "MOVE" -> handleMove(session, uri)
-                    "LOCK" -> handleLock(session, uri)
-                    "UNLOCK" -> handleUnlock(session, uri)
+                    "PROPFIND" -> webdavHandler.handlePropFind(session, uri)
+                    "PROPPATCH" -> webdavHandler.handlePropPatch(uri)
+                    "MKCOL" -> webdavHandler.handleMkCol(session, uri)
+                    "COPY" -> webdavHandler.handleCopy(session, uri)
+                    "MOVE" -> webdavHandler.handleMove(session, uri)
+                    "LOCK" -> webdavHandler.handleLock(session, uri)
+                    "UNLOCK" -> webdavHandler.handleUnlock(session, uri)
                     else -> newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Method not allowed")
                 }
             }

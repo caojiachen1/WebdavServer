@@ -5,8 +5,7 @@ import com.hqsrawmelon.webdavserver.utils.WebDAVUtils
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.*
-import java.net.InetAddress
-import java.net.URLDecoder
+import java.net.*
 import java.util.zip.GZIPInputStream
 import java.util.concurrent.ConcurrentHashMap
 import android.util.Base64
@@ -309,7 +308,7 @@ class WebDAVHandler(
         }
     }
     
-    fun handlePropFind(session: IHTTPSession, uri: String, headers: Map<String, String>): Response {
+    fun handlePropFind(session: IHTTPSession, uri: String): Response {
         val securityResponse = checkSecurityPreconditions(session)
         if (securityResponse != null) return securityResponse
 
@@ -320,7 +319,7 @@ class WebDAVHandler(
             return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "File not found")
         }
         
-        val depth = headers["depth"] ?: "1"
+        val depth = session.headers["depth"] ?: "1"
         val xml = webdavUtils.generatePropFindResponse(file, uri, depth)
         
         return newFixedLengthResponse(Response.Status.MULTI_STATUS, "application/xml; charset=utf-8", xml)
