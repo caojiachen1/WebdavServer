@@ -2,6 +2,7 @@
 
 *.apk
 *.aab
+*.bat
 
 bin/
 gen/
