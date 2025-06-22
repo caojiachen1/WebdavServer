@@ -34,7 +34,7 @@ class WebDAVHandler(
     )
     
     // Security utility methods migrated from CustomWebDAVServer
-    private fun getClientIP(session: IHTTPSession): String {
+    fun getClientIP(session: IHTTPSession): String {
         val xForwardedFor = session.headers["x-forwarded-for"]
         val xRealIP = session.headers["x-real-ip"]
         return when {
@@ -44,7 +44,7 @@ class WebDAVHandler(
         }
     }
 
-    private fun isIPBlocked(clientIP: String): Boolean {
+    fun isIPBlocked(clientIP: String): Boolean {
         val blockDuration = runBlocking { settingsManager.blockDuration.first() } * 1000L
         val blockedTime = blockedIPs[clientIP]
         return if (blockedTime != null) {
@@ -61,7 +61,7 @@ class WebDAVHandler(
         }
     }
 
-    private fun isIPAllowed(clientIP: String): Boolean {
+    fun isIPAllowed(clientIP: String): Boolean {
         val enableIpWhitelist = runBlocking { settingsManager.enableIpWhitelist.first() }
         if (!enableIpWhitelist) return true
 
@@ -81,7 +81,7 @@ class WebDAVHandler(
         }
     }
 
-    private fun isIPInCIDR(ip: String, cidr: String): Boolean {
+    fun isIPInCIDR(ip: String, cidr: String): Boolean {
         try {
             val parts = cidr.split("/")
             if (parts.size != 2) return false
@@ -109,7 +109,7 @@ class WebDAVHandler(
         }
     }
 
-    private fun recordFailedAttempt(clientIP: String) {
+    fun recordFailedAttempt(clientIP: String) {
         val maxFailedAttempts = runBlocking { settingsManager.maxFailedAttempts.first() }
         val currentTime = System.currentTimeMillis()
 
@@ -123,7 +123,7 @@ class WebDAVHandler(
         }
     }
 
-    private fun isAuthenticated(authHeader: String?): Boolean {
+    fun isAuthenticated(authHeader: String?): Boolean {
         val allowAnonymous = runBlocking { settingsManager.allowAnonymous.first() }
         if (allowAnonymous) return true
         if (authHeader == null || !authHeader.startsWith("Basic ")) return false
@@ -324,8 +324,6 @@ class WebDAVHandler(
         
         return newFixedLengthResponse(Response.Status.MULTI_STATUS, "application/xml; charset=utf-8", xml)
     }
-    
-//    private val customProperties = ConcurrentHashMap<String, MutableMap<String, String>>()
 
     fun handlePropPatch(uri: String): Response {
         val properties = customProperties.getOrPut(uri) { mutableMapOf() }
