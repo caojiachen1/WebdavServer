@@ -37,7 +37,8 @@ fun BackupToolsDetail(settingsManager: SettingsManager) {
                 scope.launch {
                     try {
                         context.contentResolver.openOutputStream(it)?.use { outputStream ->
-                            outputStream.write(settingsManager.exportSettings().toByteArray())
+                            val settingsJson = settingsManager.exportSettings()
+                            outputStream.write(settingsJson.toByteArray())
                         }
                         snackbarHostState.showSnackbar("设置导出成功")
                     } catch (e: Exception) {
@@ -216,9 +217,13 @@ fun BackupToolsDetail(settingsManager: SettingsManager) {
                     onClick = {
                         scope.launch {
                             try {
-                                settingsManager.resetToDefaults()
+                                val success = settingsManager.resetAllSettings()
                                 showResetDialog = false
-                                snackbarHostState.showSnackbar("设置已重置为默认值")
+                                if (success) {
+                                    snackbarHostState.showSnackbar("设置已重置为默认值")
+                                } else {
+                                    snackbarHostState.showSnackbar("重置失败")
+                                }
                             } catch (e: Exception) {
                                 snackbarHostState.showSnackbar("重置失败: ${e.message}")
                             }

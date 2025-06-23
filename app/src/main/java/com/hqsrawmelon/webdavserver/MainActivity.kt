@@ -51,8 +51,31 @@ class WebDAVServerViewModel(
     private val _ipAddress = MutableStateFlow("")
     val ipAddress: StateFlow<String> = _ipAddress.asStateFlow()
     
+    // Use ResourceManager for better memory management
+    private val _memoryInfo = MutableStateFlow(ResourceManager.checkMemoryUsage())
+    val memoryInfo: StateFlow<ResourceManager.MemoryInfo> = _memoryInfo.asStateFlow()
+    
     init {
         updateIpAddress()
+        // Add periodic memory monitoring
+        ResourceManager.addDisposable("WebDAVServerViewModel") {
+            webServer?.stop()
+            webServer = null
+        }
+        startMemoryMonitoring()
+    }
+    
+    private fun startMemoryMonitoring() {
+        viewModelScope.launch {
+            while (true) {
+                delay(30000) // Update every 30 seconds
+                _memoryInfo.value = ResourceManager.checkMemoryUsage()
+                // Force GC if memory usage is high
+                if (_memoryInfo.value.usagePercentage > 80) {
+                    ResourceManager.forceGarbageCollection()
+                }
+            }
+        }
     }
     
     private fun updateIpAddress() {
@@ -171,6 +194,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Register for resource management
+        this.registerForResourceManagement()
+
         // Initialize managers
         settingsManager = SettingsManager(this)
         networkDiagnostics = NetworkDiagnostics(this)
@@ -262,7 +288,16 @@ class MainActivity : ComponentActivity() {
                 MainScreen()
             }
             composable("details_screen") {
-                DetailsScreen(navController)
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("Details Screen")
+                    Button(onClick = { navController.popBackStack() }) {
+                        Text("Go Back")
+                    }
+                }
             }
         }
     }
@@ -282,6 +317,7 @@ class MainActivity : ComponentActivity() {
         val isServerRunning by viewModel.isServerRunning.collectAsState()
         val serverStatus by viewModel.serverStatus.collectAsState()
         val ipAddress by viewModel.ipAddress.collectAsState()
+        val memoryInfo by viewModel.memoryInfo.collectAsState()
         
         val username by settingsManager.username.collectAsState()
         val password by settingsManager.password.collectAsState()
@@ -482,6 +518,7 @@ class MainActivity : ComponentActivity() {
                                 ipAddress = ipAddress,
                                 isServerRunning = isServerRunning,
                                 serverStatus = serverStatus,
+                                memoryInfo = memoryInfo,
                             )
                         1 ->
                             FileManagerScreen(
@@ -523,6 +560,7 @@ class MainActivity : ComponentActivity() {
         ipAddress: String,
         isServerRunning: Boolean,
         serverStatus: String,
+        memoryInfo: ResourceManager.MemoryInfo,
     ) {
         val scope = rememberCoroutineScope()
 
@@ -539,6 +577,7 @@ class MainActivity : ComponentActivity() {
             serverPort = serverPort,
             allowAnonymous = allowAnonymous,
             username = username,
+            memoryInfo = memoryInfo,
             onServerToggle = {
                 scope.launch {
                     if (isServerRunning) {
@@ -560,6 +599,7 @@ class MainActivity : ComponentActivity() {
         serverPort: Int,
         allowAnonymous: Boolean,
         username: String,
+        memoryInfo: ResourceManager.MemoryInfo,
         onServerToggle: () -> Unit
     ) {
 
@@ -594,18 +634,64 @@ class MainActivity : ComponentActivity() {
                     ipAddress = ipAddress,
                     serverPort = serverPort,
                     allowAnonymous = allowAnonymous,
-                    username = username
+                    username = username,
+                    memoryInfo = memoryInfo
                 )
 
                 // Control Button
-                ServerControlButton(
-                    isServerRunning = isServerRunning,
-                    onToggle = onServerToggle
-                )
+                Button(
+                    onClick = onServerToggle,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isServerRunning) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                    ),
+                ) {
+                    Icon(
+                        imageVector = if (isServerRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = if (isServerRunning) "停止服务器" else "启动服务器",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
 
                 // Quick Access Info
                 if (!isServerRunning) {
-                    QuickStartCard()
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                        ) {
+                            Text(
+                                text = "快速开始",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "1. 确保设备连接到WiFi网络\n" +
+                                        "2. 在设置中配置用户名和密码\n" +
+                                        "3. 点击启动服务器按钮\n" +
+                                        "4. 使用WebDAV客户端连接",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -618,7 +704,8 @@ class MainActivity : ComponentActivity() {
         ipAddress: String,
         serverPort: Int,
         allowAnonymous: Boolean,
-        username: String
+        username: String,
+        memoryInfo: ResourceManager.MemoryInfo
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -705,90 +792,85 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                    
+                    // Memory usage information
+                    Spacer(modifier = Modifier.height(20.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "系统状态",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (memoryInfo.usagePercentage > 80) {
+                                MaterialTheme.colorScheme.errorContainer
+                            } else {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            },
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "内存使用:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = "${memoryInfo.usagePercentage}%",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "已用:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = memoryInfo.formatUsedMemory(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "可用:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = memoryInfo.formatAvailableMemory(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
-    @Composable
-    private fun ServerControlButton(
-        isServerRunning: Boolean,
-        onToggle: () -> Unit
-    ) {
-        Button(
-            onClick = onToggle,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isServerRunning) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-            ),
-        ) {
-            Icon(
-                imageVector = if (isServerRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = if (isServerRunning) "停止服务器" else "启动服务器",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-    }
-
-    @Composable
-    private fun QuickStartCard() {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            ),
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-            ) {
-                Text(
-                    text = "快速开始",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "1. 确保设备连接到WiFi网络\n" +
-                            "2. 在设置中配置用户名和密码\n" +
-                            "3. 点击启动服务器按钮\n" +
-                            "4. 使用WebDAV客户端连接",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-
-    // 移除原有的 startServer 和 stopServer 方法，它们现在在 ViewModel 中
-
     override fun onDestroy() {
+        // Clean up resources before calling super
+        this.unregisterFromResourceManagement()
         super.onDestroy()
         // ViewModel 会自动处理清理
-    }
-
-    @Composable
-    fun DetailsScreen(navController: NavController) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text("Details Screen")
-            Button(onClick = { navController.popBackStack() }) {
-                Text("Go Back")
-            }
-        }
     }
 }

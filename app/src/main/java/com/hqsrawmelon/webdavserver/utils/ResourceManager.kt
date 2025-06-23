@@ -1,4 +1,4 @@
-package com.hqsrawmelon.webdavserver.optimization
+package com.hqsrawmelon.webdavserver.utils
 
 import android.app.Activity
 import android.content.Context
