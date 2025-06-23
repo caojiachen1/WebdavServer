@@ -933,7 +933,8 @@ fun NetworkDiagnosticsDetail(
                                     isTestingNetwork = true
                                     scope.launch {
                                         try {
-                                            networkStatus = networkDiagnostics.checkNetworkStatus().toString()
+                                            val status = networkDiagnostics.checkNetworkStatus()
+                                            networkStatus = status.message
                                         } catch (e: Exception) {
                                             networkStatus = "检查失败: ${e.message}"
                                         } finally {
@@ -962,7 +963,8 @@ fun NetworkDiagnosticsDetail(
                                     isTestingPort = true
                                     scope.launch {
                                         try {
-                                            portTestResult = networkDiagnostics.testPort(8080).toString()
+                                            val result = networkDiagnostics.testPort(8080)
+                                            portTestResult = result.message
                                         } catch (e: Exception) {
                                             portTestResult = "测试失败: ${e.message}"
                                         } finally {
