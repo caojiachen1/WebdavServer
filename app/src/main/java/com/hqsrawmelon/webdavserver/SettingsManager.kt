@@ -1,11 +1,11 @@
 package com.hqsrawmelon.webdavserver
 
 import android.content.*
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.*
-import org.json.JSONObject
 import com.hqsrawmelon.webdavserver.utils.PerformanceUtils
 import com.hqsrawmelon.webdavserver.utils.ResourceManager
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import org.json.JSONObject
 
 /**
  * 优化的设置管理器
@@ -17,7 +17,7 @@ class SettingsManager(
     val context = context
     private val prefs: SharedPreferences = context.getSharedPreferences("webdav_settings", Context.MODE_PRIVATE)
     private val logManager = LogManager(context)
-    
+
     // 批量更新状态管理
     private val pendingUpdates = mutableMapOf<String, Any>()
     private val updateDebouncer = PerformanceUtils.Debouncer(500L) // 500ms 延迟批量提交
@@ -99,16 +99,19 @@ class SettingsManager(
     /**
      * 批量更新方法 - 优化性能
      */
-    private fun scheduleUpdate(key: String, value: Any) {
+    private fun scheduleUpdate(
+        key: String,
+        value: Any,
+    ) {
         pendingUpdates[key] = value
         updateDebouncer.debounce(coroutineScope) {
             commitPendingUpdates()
         }
     }
-    
+
     private suspend fun commitPendingUpdates() {
         if (pendingUpdates.isEmpty()) return
-        
+
         try {
             val editor = prefs.edit()
             pendingUpdates.forEach { (key, value) ->
@@ -120,15 +123,15 @@ class SettingsManager(
                     is Long -> editor.putLong(key, value)
                 }
             }
-            
+
             // 使用 apply() 而不是 commit() 来异步保存
             editor.apply()
-            
+
             // 记录批量更新日志
             if (_enableLogging.value) {
                 logManager.logInfo("Settings", "Batch updated ${pendingUpdates.size} settings")
             }
-            
+
             pendingUpdates.clear()
         } catch (e: Exception) {
             if (_enableLogging.value) {
@@ -255,11 +258,11 @@ class SettingsManager(
         coroutineScope.launch {
             try {
                 val editor = prefs.edit()
-                
+
                 updates.forEach { (key, value) ->
                     // 更新内存中的状态
                     updateInMemoryState(key, value)
-                    
+
                     // 准备 SharedPreferences 更新
                     when (value) {
                         is String -> editor.putString(key, value)
@@ -269,9 +272,9 @@ class SettingsManager(
                         is Long -> editor.putLong(key, value)
                     }
                 }
-                
+
                 editor.apply()
-                
+
                 if (_enableLogging.value) {
                     logManager.logInfo("Settings", "Batch updated ${updates.size} settings")
                 }
@@ -282,8 +285,11 @@ class SettingsManager(
             }
         }
     }
-    
-    private fun updateInMemoryState(key: String, value: Any) {
+
+    private fun updateInMemoryState(
+        key: String,
+        value: Any,
+    ) {
         when (key) {
             "username" -> if (value is String) _username.value = value
             "password" -> if (value is String) _password.value = value
@@ -311,138 +317,143 @@ class SettingsManager(
     /**
      * 导出设置 - 缓存优化
      */
-    suspend fun exportSettings(): String = withContext(Dispatchers.IO) {
-        val cacheKey = "export_settings_${System.currentTimeMillis() / 60000}" // 1分钟缓存
-        PerformanceUtils.getCached(cacheKey) {
-            try {
-                val json = JSONObject().apply {
-                    put("username", username.value)
-                    put("password", password.value)
-                    put("allow_anonymous", allowAnonymous.value)
-                    put("server_port", serverPort.value)
-                    put("enable_https", enableHttps.value)
-                    put("connection_timeout", connectionTimeout.value)
-                    put("max_connections", maxConnections.value)
-                    put("buffer_size", bufferSize.value)
-                    put("enable_cors", enableCors.value)
-                    put("enable_compression", enableCompression.value)
-                    put("enable_ip_whitelist", enableIpWhitelist.value)
-                    put("ip_whitelist", ipWhitelist.value)
-                    put("max_failed_attempts", maxFailedAttempts.value)
-                    put("block_duration", blockDuration.value)
-                    put("enable_logging", enableLogging.value)
-                    put("log_level", logLevel.value)
-                    put("max_log_size", maxLogSize.value)
-                    put("export_timestamp", System.currentTimeMillis())
-                    put("app_version", "1.0.0")
+    suspend fun exportSettings(): String =
+        withContext(Dispatchers.IO) {
+            val cacheKey = "export_settings_${System.currentTimeMillis() / 60000}" // 1分钟缓存
+            PerformanceUtils.getCached(cacheKey) {
+                try {
+                    val json =
+                        JSONObject().apply {
+                            put("username", username.value)
+                            put("password", password.value)
+                            put("allow_anonymous", allowAnonymous.value)
+                            put("server_port", serverPort.value)
+                            put("enable_https", enableHttps.value)
+                            put("connection_timeout", connectionTimeout.value)
+                            put("max_connections", maxConnections.value)
+                            put("buffer_size", bufferSize.value)
+                            put("enable_cors", enableCors.value)
+                            put("enable_compression", enableCompression.value)
+                            put("enable_ip_whitelist", enableIpWhitelist.value)
+                            put("ip_whitelist", ipWhitelist.value)
+                            put("max_failed_attempts", maxFailedAttempts.value)
+                            put("block_duration", blockDuration.value)
+                            put("enable_logging", enableLogging.value)
+                            put("log_level", logLevel.value)
+                            put("max_log_size", maxLogSize.value)
+                            put("export_timestamp", System.currentTimeMillis())
+                            put("app_version", "1.0.0")
+                        }
+                    json.toString(2)
+                } catch (e: Exception) {
+                    if (_enableLogging.value) {
+                        logManager.logError("Settings", "Export failed: ${e.message}")
+                    }
+                    "{\"error\": \"导出失败: ${e.message}\"}"
                 }
-                json.toString(2)
-            } catch (e: Exception) {
-                if (_enableLogging.value) {
-                    logManager.logError("Settings", "Export failed: ${e.message}")
-                }
-                "{\"error\": \"导出失败: ${e.message}\"}"
             }
         }
-    }
 
     /**
      * 导入设置 - 批量操作优化
      */
-    suspend fun importSettings(jsonString: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val json = JSONObject(jsonString)
-            val updates = mutableMapOf<String, Any>()
-            
-            // 构建批量更新Map
-            listOf(
-                "username" to String::class,
-                "password" to String::class,
-                "allow_anonymous" to Boolean::class,
-                "server_port" to Int::class,
-                "enable_https" to Boolean::class,
-                "connection_timeout" to Int::class,
-                "max_connections" to Int::class,
-                "buffer_size" to Int::class,
-                "enable_cors" to Boolean::class,
-                "enable_compression" to Boolean::class,
-                "enable_ip_whitelist" to Boolean::class,
-                "ip_whitelist" to String::class,
-                "max_failed_attempts" to Int::class,
-                "block_duration" to Int::class,
-                "enable_logging" to Boolean::class,
-                "log_level" to String::class,
-                "max_log_size" to Int::class
-            ).forEach { (key, type) ->
-                if (json.has(key)) {
-                    when (type) {
-                        String::class -> updates[key] = json.getString(key)
-                        Boolean::class -> updates[key] = json.getBoolean(key)
-                        Int::class -> updates[key] = json.getInt(key)
+    suspend fun importSettings(jsonString: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val json = JSONObject(jsonString)
+                val updates = mutableMapOf<String, Any>()
+
+                // 构建批量更新Map
+                listOf(
+                    "username" to String::class,
+                    "password" to String::class,
+                    "allow_anonymous" to Boolean::class,
+                    "server_port" to Int::class,
+                    "enable_https" to Boolean::class,
+                    "connection_timeout" to Int::class,
+                    "max_connections" to Int::class,
+                    "buffer_size" to Int::class,
+                    "enable_cors" to Boolean::class,
+                    "enable_compression" to Boolean::class,
+                    "enable_ip_whitelist" to Boolean::class,
+                    "ip_whitelist" to String::class,
+                    "max_failed_attempts" to Int::class,
+                    "block_duration" to Int::class,
+                    "enable_logging" to Boolean::class,
+                    "log_level" to String::class,
+                    "max_log_size" to Int::class,
+                ).forEach { (key, type) ->
+                    if (json.has(key)) {
+                        when (type) {
+                            String::class -> updates[key] = json.getString(key)
+                            Boolean::class -> updates[key] = json.getBoolean(key)
+                            Int::class -> updates[key] = json.getInt(key)
+                        }
                     }
                 }
-            }
-            
-            if (updates.isNotEmpty()) {
-                batchUpdate(updates)
-                if (_enableLogging.value) {
-                    logManager.logInfo("Settings", "Imported ${updates.size} settings")
+
+                if (updates.isNotEmpty()) {
+                    batchUpdate(updates)
+                    if (_enableLogging.value) {
+                        logManager.logInfo("Settings", "Imported ${updates.size} settings")
+                    }
+                    true
+                } else {
+                    false
                 }
-                true
-            } else {
+            } catch (e: Exception) {
+                if (_enableLogging.value) {
+                    logManager.logError("Settings", "Import failed: ${e.message}")
+                }
                 false
             }
-        } catch (e: Exception) {
-            if (_enableLogging.value) {
-                logManager.logError("Settings", "Import failed: ${e.message}")
-            }
-            false
         }
-    }
 
     /**
      * 重置所有设置 - 批量操作（异步版本）
      */
-    suspend fun resetAllSettings(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            if (_enableLogging.value) {
-                logManager.logInfo("Settings", "Resetting all settings to defaults")
-            }
+    suspend fun resetAllSettings(): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                if (_enableLogging.value) {
+                    logManager.logInfo("Settings", "Resetting all settings to defaults")
+                }
 
-            val defaultSettings = mapOf(
-                "username" to "admin",
-                "password" to "123456",
-                "allow_anonymous" to false,
-                "server_port" to 8080,
-                "enable_https" to false,
-                "connection_timeout" to 30,
-                "max_connections" to 10,
-                "buffer_size" to 8192,
-                "enable_cors" to true,
-                "enable_compression" to false,
-                "enable_ip_whitelist" to false,
-                "ip_whitelist" to "192.168.1.0/24",
-                "max_failed_attempts" to 5,
-                "block_duration" to 300,
-                "enable_logging" to true,
-                "log_level" to "INFO",
-                "max_log_size" to 10
-            )
-            
-            batchUpdate(defaultSettings)
-            
-            if (_enableLogging.value) {
-                logManager.logInfo("Settings", "All settings reset to default")
+                val defaultSettings =
+                    mapOf(
+                        "username" to "admin",
+                        "password" to "123456",
+                        "allow_anonymous" to false,
+                        "server_port" to 8080,
+                        "enable_https" to false,
+                        "connection_timeout" to 30,
+                        "max_connections" to 10,
+                        "buffer_size" to 8192,
+                        "enable_cors" to true,
+                        "enable_compression" to false,
+                        "enable_ip_whitelist" to false,
+                        "ip_whitelist" to "192.168.1.0/24",
+                        "max_failed_attempts" to 5,
+                        "block_duration" to 300,
+                        "enable_logging" to true,
+                        "log_level" to "INFO",
+                        "max_log_size" to 10,
+                    )
+
+                batchUpdate(defaultSettings)
+
+                if (_enableLogging.value) {
+                    logManager.logInfo("Settings", "All settings reset to default")
+                }
+                true
+            } catch (e: Exception) {
+                if (_enableLogging.value) {
+                    logManager.logError("Settings", "Reset failed: ${e.message}")
+                }
+                false
             }
-            true
-        } catch (e: Exception) {
-            if (_enableLogging.value) {
-                logManager.logError("Settings", "Reset failed: ${e.message}")
-            }
-            false
         }
-    }
-    
+
     /**
      * 向后兼容的同步版本
      */
@@ -471,7 +482,7 @@ class SettingsManager(
         _logLevel.value = "INFO"
         _maxLogSize.value = 10
     }
-    
+
     /**
      * 清理资源
      */
@@ -483,14 +494,10 @@ class SettingsManager(
     /**
      * 获取系统配置信息
      */
-    fun getSystemConfig(): ResourceManager.SystemConfig {
-        return ResourceManager.getSystemConfig(context)
-    }
+    fun getSystemConfig(): ResourceManager.SystemConfig = ResourceManager.getSystemConfig(context)
 
     /**
      * 获取内存使用情况
      */
-    fun getMemoryInfo(): ResourceManager.MemoryInfo {
-        return ResourceManager.checkMemoryUsage()
-    }
+    fun getMemoryInfo(): ResourceManager.MemoryInfo = ResourceManager.checkMemoryUsage()
 }

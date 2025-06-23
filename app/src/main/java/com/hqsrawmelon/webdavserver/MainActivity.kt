@@ -1,10 +1,8 @@
 package com.hqsrawmelon.webdavserver
 
 import android.Manifest
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.content.res.Configuration
 import android.os.*
 import androidx.activity.ComponentActivity
@@ -24,42 +22,39 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import androidx.navigation.NavController
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.*
-import com.hqsrawmelon.webdavserver.server.CustomWebDAVServer
 import com.hqsrawmelon.webdavserver.service.WebDAVService
 import com.hqsrawmelon.webdavserver.ui.theme.WebdavServerTheme
 import com.hqsrawmelon.webdavserver.utils.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.*
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
  * WebDAV 服务器状态管理 ViewModel
  */
 class WebDAVServerViewModel(
     private val settingsManager: SettingsManager,
-    private val context: android.content.Context
+    private val context: android.content.Context,
 ) : ViewModel() {
     private val _isServerRunning = MutableStateFlow(false)
     val isServerRunning: StateFlow<Boolean> = _isServerRunning.asStateFlow()
-    
+
     private val _serverStatus = MutableStateFlow("服务器已停止")
     val serverStatus: StateFlow<String> = _serverStatus.asStateFlow()
-    
+
     private val _ipAddress = MutableStateFlow("")
     val ipAddress: StateFlow<String> = _ipAddress.asStateFlow()
-    
+
     // Use ResourceManager for better memory management
     private val _memoryInfo = MutableStateFlow(ResourceManager.checkMemoryUsage())
     val memoryInfo: StateFlow<ResourceManager.MemoryInfo> = _memoryInfo.asStateFlow()
-    
+
     init {
         updateIpAddress()
         // Add periodic memory monitoring
@@ -67,24 +62,35 @@ class WebDAVServerViewModel(
             stopServer()
         }
         startMemoryMonitoring()
-        
+
         // 监听服务状态
         startServiceStatusMonitoring()
     }
-    
+
     private fun startServiceStatusMonitoring() {
         viewModelScope.launch {
             while (true) {
                 delay(1000) // 每秒检查一次
                 val serviceRunning = WebDAVService.isServiceRunning
-                if (_isServerRunning.value != serviceRunning) {
-                    _isServerRunning.value = serviceRunning
-                    _serverStatus.value = if (serviceRunning) "服务器运行中" else "服务器已停止"
+                val serverRunning = WebDAVService.isServerRunning
+
+                // 使用服务器运行状态而不是服务运行状态
+                val actuallyRunning = serviceRunning && serverRunning
+
+                if (_isServerRunning.value != actuallyRunning) {
+                    _isServerRunning.value = actuallyRunning
+                    _serverStatus.value = if (actuallyRunning) "服务器运行中" else "服务器已停止"
+
+                    // 记录状态变化
+                    if (settingsManager.enableLogging.first()) {
+                        val logManager = LogManager(context)
+                        logManager.logInfo("ViewModel", "状态变化 - 服务: $serviceRunning, 服务器: $serverRunning, 实际: $actuallyRunning")
+                    }
                 }
             }
         }
     }
-    
+
     private fun startMemoryMonitoring() {
         viewModelScope.launch {
             while (true) {
@@ -97,45 +103,61 @@ class WebDAVServerViewModel(
             }
         }
     }
-    
+
     private fun updateIpAddress() {
         viewModelScope.launch {
             _ipAddress.value = getLocalIpAddress(context)
         }
     }
-    
-    suspend fun startServer(username: String, password: String, port: Int, allowAnonymous: Boolean): Boolean {
-        return try {
+
+    suspend fun startServer(
+        username: String,
+        password: String,
+        port: Int,
+        allowAnonymous: Boolean,
+    ): Boolean =
+        try {
             // 请求通知权限
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                val permission = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.POST_NOTIFICATIONS
-                )
+                val permission =
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    )
                 if (permission != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     // 权限未授予，但我们仍然尝试启动服务
                     // 用户可以在设置中手动启用通知
                 }
             }
-            
-            val intent = Intent(context, WebDAVService::class.java).apply {
-                action = WebDAVService.ACTION_START_SERVER
-                putExtra(WebDAVService.EXTRA_USERNAME, username)
-                putExtra(WebDAVService.EXTRA_PASSWORD, password)
-                putExtra(WebDAVService.EXTRA_PORT, port)
-                putExtra(WebDAVService.EXTRA_ALLOW_ANONYMOUS, allowAnonymous)
+
+            // 记录启动请求的详细信息
+            if (settingsManager.enableLogging.first()) {
+                val logManager = LogManager(context)
+                logManager.logInfo(
+                    "ViewModel",
+                    "启动服务器请求 - 端口: $port, 匿名: $allowAnonymous, 用户名: ${if (username.isNotEmpty()) "已设置" else "未设置"}",
+                )
             }
-            
+
+            val intent =
+                Intent(context, WebDAVService::class.java).apply {
+                    action = WebDAVService.ACTION_START_SERVER
+                    putExtra(WebDAVService.EXTRA_USERNAME, username)
+                    putExtra(WebDAVService.EXTRA_PASSWORD, password)
+                    putExtra(WebDAVService.EXTRA_PORT, port)
+                    putExtra(WebDAVService.EXTRA_ALLOW_ANONYMOUS, allowAnonymous)
+                }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
             }
-            
+
             // 立即更新状态，不等待监听器
             _isServerRunning.value = true
             _serverStatus.value = "正在启动服务器..."
-            
+
             true
         } catch (e: Exception) {
             _serverStatus.value = "启动失败: ${e.message}"
@@ -145,19 +167,18 @@ class WebDAVServerViewModel(
             }
             false
         }
-    }
-    
+
     fun stopServer() {
         try {
-            val intent = Intent(context, WebDAVService::class.java).apply {
-                action = WebDAVService.ACTION_STOP_SERVER
-            }
+            val intent =
+                Intent(context, WebDAVService::class.java).apply {
+                    action = WebDAVService.ACTION_STOP_SERVER
+                }
             context.startService(intent)
-            
+
             // 立即更新状态
             _isServerRunning.value = false
             _serverStatus.value = "正在停止服务器..."
-            
         } catch (e: Exception) {
             viewModelScope.launch {
                 if (settingsManager.enableLogging.first()) {
@@ -167,7 +188,26 @@ class WebDAVServerViewModel(
             }
         }
     }
-    
+
+    /**
+     * 调试方法：检查后台服务状态
+     */
+    fun debugServiceStatus(): String {
+        val serviceRunning = WebDAVService.isServiceRunning
+        val viewModelRunning = _isServerRunning.value
+        val currentStatus = _serverStatus.value
+
+        return buildString {
+            appendLine("=== WebDAV服务调试信息 ===")
+            appendLine("后台服务状态: ${if (serviceRunning) "运行中" else "已停止"}")
+            appendLine("ViewModel状态: ${if (viewModelRunning) "运行中" else "已停止"}")
+            appendLine("显示状态: $currentStatus")
+            appendLine("IP地址: ${_ipAddress.value}")
+            appendLine("内存使用: ${_memoryInfo.value.usagePercentage}%")
+            appendLine("=======================")
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         // 不在这里停止服务，让服务独立运行
@@ -177,7 +217,7 @@ class WebDAVServerViewModel(
 class MainActivity : ComponentActivity() {
     private lateinit var settingsManager: SettingsManager
     private lateinit var networkDiagnostics: NetworkDiagnostics
-    
+
     // 用于控制返回行为的状态
     private var backPressedTime = 0L
     private val backPressedToast by lazy {
@@ -197,7 +237,7 @@ class MainActivity : ComponentActivity() {
                 // Refresh network status if location permission was granted
                 // This will be handled in the UI
             }
-            
+
             // 检查通知权限
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 val notificationPermissionGranted = permissions[Manifest.permission.POST_NOTIFICATIONS] == true
@@ -296,7 +336,7 @@ class MainActivity : ComponentActivity() {
                         add(Manifest.permission.ACCESS_FINE_LOCATION)
                         add(Manifest.permission.ACCESS_COARSE_LOCATION)
                     }
-                    
+
                     // Add notification permission for Android 13+
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         add(Manifest.permission.POST_NOTIFICATIONS)
@@ -310,7 +350,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun MainApp() {
         val navController = rememberNavController()
-        
+
         // 设置返回键处理 - 只处理子页面的返回
         BackHandler(enabled = navController.previousBackStackEntry != null) {
             navController.popBackStack()
@@ -319,7 +359,7 @@ class MainActivity : ComponentActivity() {
         NavHost(
             navController = navController,
             startDestination = "main_screen",
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
         ) {
             composable("main_screen") {
                 MainScreen()
@@ -328,7 +368,7 @@ class MainActivity : ComponentActivity() {
                 Column(
                     modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                    verticalArrangement = Arrangement.Center,
                 ) {
                     Text("Details Screen")
                     Button(onClick = { navController.popBackStack() }) {
@@ -346,26 +386,27 @@ class MainActivity : ComponentActivity() {
         val scope = rememberCoroutineScope()
 
         // 使用 ViewModel 管理服务器状态
-        val viewModel = remember { 
-            WebDAVServerViewModel(settingsManager, this@MainActivity) 
-        }
-        
+        val viewModel =
+            remember {
+                WebDAVServerViewModel(settingsManager, this@MainActivity)
+            }
+
         // Collect states from ViewModel and SettingsManager
         val isServerRunning by viewModel.isServerRunning.collectAsState()
         val serverStatus by viewModel.serverStatus.collectAsState()
         val ipAddress by viewModel.ipAddress.collectAsState()
         val memoryInfo by viewModel.memoryInfo.collectAsState()
-        
+
         val username by settingsManager.username.collectAsState()
         val password by settingsManager.password.collectAsState()
         val serverPort by settingsManager.serverPort.collectAsState()
         val allowAnonymous by settingsManager.allowAnonymous.collectAsState()
-        
+
         // File manager state for navigation
         var currentDirectory by remember { mutableStateOf(webdavRootDir) }
         var refreshTrigger by remember { mutableStateOf(0) }
         val context = LocalContext.current
-        
+
         // 添加主页面返回逻辑 - 双击退出应用
         BackHandler {
             if (System.currentTimeMillis() - backPressedTime < 2000) {
@@ -623,7 +664,7 @@ class MainActivity : ComponentActivity() {
                         viewModel.startServer(username, password, serverPort, allowAnonymous)
                     }
                 }
-            }
+            },
         )
     }
 
@@ -637,9 +678,8 @@ class MainActivity : ComponentActivity() {
         allowAnonymous: Boolean,
         username: String,
         memoryInfo: ResourceManager.MemoryInfo,
-        onServerToggle: () -> Unit
+        onServerToggle: () -> Unit,
     ) {
-
         Column(
             modifier = Modifier.fillMaxSize(),
         ) {
@@ -651,16 +691,18 @@ class MainActivity : ComponentActivity() {
                         fontWeight = FontWeight.Bold,
                     )
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
+                colors =
+                    TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    ),
             )
 
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
@@ -672,22 +714,25 @@ class MainActivity : ComponentActivity() {
                     serverPort = serverPort,
                     allowAnonymous = allowAnonymous,
                     username = username,
-                    memoryInfo = memoryInfo
+                    memoryInfo = memoryInfo,
                 )
 
                 // Control Button
                 Button(
                     onClick = onServerToggle,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isServerRunning) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.primary
-                        },
-                    ),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor =
+                                if (isServerRunning) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                },
+                        ),
                 ) {
                     Icon(
                         imageVector = if (isServerRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -706,9 +751,10 @@ class MainActivity : ComponentActivity() {
                 if (!isServerRunning) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        ),
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            ),
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -739,16 +785,17 @@ class MainActivity : ComponentActivity() {
         serverPort: Int,
         allowAnonymous: Boolean,
         username: String,
-        memoryInfo: ResourceManager.MemoryInfo
+        memoryInfo: ResourceManager.MemoryInfo,
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // Status Icon
@@ -777,7 +824,7 @@ class MainActivity : ComponentActivity() {
                     fontWeight = FontWeight.Medium,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
-                
+
                 // 添加后台服务状态指示
                 if (isServerRunning) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -804,9 +851,10 @@ class MainActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        ),
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(
@@ -828,17 +876,18 @@ class MainActivity : ComponentActivity() {
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Text(
-                                text = if (allowAnonymous) {
-                                    "访问模式: 匿名访问"
-                                } else {
-                                    "用户名: $username"
-                                },
+                                text =
+                                    if (allowAnonymous) {
+                                        "访问模式: 匿名访问"
+                                    } else {
+                                        "用户名: $username"
+                                    },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
                         }
                     }
-                    
+
                     // Memory usage information
                     Spacer(modifier = Modifier.height(20.dp))
                     HorizontalDivider()
@@ -853,13 +902,15 @@ class MainActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (memoryInfo.usagePercentage > 80) {
-                                MaterialTheme.colorScheme.errorContainer
-                            } else {
-                                MaterialTheme.colorScheme.secondaryContainer
-                            },
-                        ),
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor =
+                                    if (memoryInfo.usagePercentage > 80) {
+                                        MaterialTheme.colorScheme.errorContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    },
+                            ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(
@@ -920,12 +971,12 @@ class MainActivity : ComponentActivity() {
         // ViewModel 会自动处理清理
         // 注意：不在这里停止服务，让服务独立运行
     }
-    
+
     override fun onPause() {
         super.onPause()
         // 当应用进入后台时，服务继续运行
     }
-    
+
     override fun onResume() {
         super.onResume()
         // 当应用恢复时，刷新服务状态

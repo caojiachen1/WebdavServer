@@ -21,11 +21,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.hqsrawmelon.webdavserver.utils.PerformanceUtils
 import kotlinx.coroutines.*
 import java.io.*
 import java.text.SimpleDateFormat
 import java.util.*
-import com.hqsrawmelon.webdavserver.utils.PerformanceUtils
 
 data class FileItem(
     val file: File,
@@ -41,51 +41,52 @@ data class FileItem(
 @Stable
 class FileManagerState(
     private val rootDir: File,
-    private val coroutineScope: CoroutineScope
+    private val coroutineScope: CoroutineScope,
 ) {
     private val _currentDirectory = mutableStateOf(rootDir)
     val currentDirectory: State<File> = _currentDirectory
-    
+
     private val _files = mutableStateOf<List<FileItem>>(emptyList())
     val files: State<List<FileItem>> = _files
-    
+
     private val _isLoading = mutableStateOf(false)
     val isLoading: State<Boolean> = _isLoading
-    
+
     private val debouncer = PerformanceUtils.Debouncer(150L)
-    
+
     init {
         loadFiles()
     }
-    
+
     fun navigateToDirectory(directory: File) {
         if (directory.exists() && directory.isDirectory) {
             _currentDirectory.value = directory
             loadFiles()
         }
     }
-    
+
     fun navigateUp() {
         val parent = currentDirectory.value.parentFile
         if (parent != null && parent.path.startsWith(rootDir.path)) {
             navigateToDirectory(parent)
         }
     }
-    
+
     fun refresh() {
         debouncer.debounce(coroutineScope) {
             loadFiles()
         }
     }
-    
+
     private fun loadFiles() {
         coroutineScope.launch {
             _isLoading.value = true
             try {
                 val cacheKey = "files_${currentDirectory.value.absolutePath}"
-                val loadedFiles = PerformanceUtils.getCached(cacheKey) {
-                    loadFilesInternal(currentDirectory.value)
-                }
+                val loadedFiles =
+                    PerformanceUtils.getCached(cacheKey) {
+                        loadFilesInternal(currentDirectory.value)
+                    }
                 _files.value = loadedFiles
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -95,23 +96,24 @@ class FileManagerState(
             }
         }
     }
-    
-    private suspend fun loadFilesInternal(directory: File): List<FileItem> = 
+
+    private suspend fun loadFilesInternal(directory: File): List<FileItem> =
         withContext(Dispatchers.IO) {
             try {
-                directory.listFiles()
+                directory
+                    .listFiles()
                     ?.map { file -> FileItem(file) }
                     ?.sortedWith(
                         compareBy<FileItem> { !it.isDirectory }
-                            .thenBy { it.name.lowercase() }
+                            .thenBy { it.name.lowercase() },
                     ) ?: emptyList()
             } catch (e: Exception) {
                 emptyList()
             }
         }
-    
-    suspend fun createFolder(folderName: String): Boolean {
-        return withContext(Dispatchers.IO) {
+
+    suspend fun createFolder(folderName: String): Boolean =
+        withContext(Dispatchers.IO) {
             try {
                 val newFolder = File(currentDirectory.value, folderName)
                 val success = newFolder.mkdirs()
@@ -125,10 +127,12 @@ class FileManagerState(
                 false
             }
         }
-    }
-    
-    suspend fun renameFile(file: File, newName: String): Boolean {
-        return withContext(Dispatchers.IO) {
+
+    suspend fun renameFile(
+        file: File,
+        newName: String,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
             try {
                 val newFile = File(file.parent, newName)
                 val success = file.renameTo(newFile)
@@ -141,16 +145,16 @@ class FileManagerState(
                 false
             }
         }
-    }
-    
-    suspend fun deleteFile(file: File): Boolean {
-        return withContext(Dispatchers.IO) {
+
+    suspend fun deleteFile(file: File): Boolean =
+        withContext(Dispatchers.IO) {
             try {
-                val success = if (file.isDirectory) {
-                    file.deleteRecursively()
-                } else {
-                    file.delete()
-                }
+                val success =
+                    if (file.isDirectory) {
+                        file.deleteRecursively()
+                    } else {
+                        file.delete()
+                    }
                 if (success) {
                     PerformanceUtils.clearCache("files_${currentDirectory.value.absolutePath}")
                     loadFiles()
@@ -160,7 +164,6 @@ class FileManagerState(
                 false
             }
         }
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class, ExperimentalAnimationApi::class)
@@ -261,7 +264,7 @@ fun FileManagerScreen(
         // Always reload files when directory changes or refresh is triggered
         files = loadFiles(currentDirectory)
     }
-    
+
     // 添加返回键处理，当不在根目录时返回上级目录
     BackHandler(enabled = currentDirectory != rootDir) {
         onDirectoryChange(currentDirectory.parentFile ?: rootDir)

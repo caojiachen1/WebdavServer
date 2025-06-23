@@ -520,9 +520,10 @@ fun BackgroundServiceSettingsDetail(settingsManager: SettingsManager) {
     val context = LocalContext.current
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
@@ -621,9 +622,10 @@ fun BackgroundServiceSettingsDetail(settingsManager: SettingsManager) {
 
         item {
             Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                ),
+                colors =
+                    CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    ),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(
@@ -639,7 +641,8 @@ fun BackgroundServiceSettingsDetail(settingsManager: SettingsManager) {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "• 启用后台服务后，WebDAV服务器将在前台服务中运行\n" +
+                        text =
+                            "• 启用后台服务后，WebDAV服务器将在前台服务中运行\n" +
                                 "• 服务器会在通知栏显示运行状态\n" +
                                 "• 关闭应用不会停止服务器运行\n" +
                                 "• 可通过通知栏的按钮控制服务器启停\n" +
@@ -654,16 +657,18 @@ fun BackgroundServiceSettingsDetail(settingsManager: SettingsManager) {
         // 通知权限提示 (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             item {
-                val hasNotificationPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED
+                val hasNotificationPermission =
+                    androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    ) == PackageManager.PERMISSION_GRANTED
 
                 if (!hasNotificationPermission) {
                     Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                        ),
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                            ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(

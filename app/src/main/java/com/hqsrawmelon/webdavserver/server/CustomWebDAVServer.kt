@@ -18,7 +18,7 @@ class CustomWebDAVServer(
     private val logManager = LogManager(settingsManager)
     private val failedAttempts = ConcurrentHashMap<String, AttemptTracker>()
     private val blockedIPs = ConcurrentHashMap<String, Long>()
-    private val webdavHandler = WebDAVHandler(rootDir, settingsManager, logManager)
+    private val webdavHandler = WebDAVHandler(rootDir, settingsManager, logManager, username, password)
 
     data class AttemptTracker(
         var count: Int,
@@ -29,7 +29,10 @@ class CustomWebDAVServer(
         if (!rootDir.exists()) {
             rootDir.mkdirs()
         }
-        logManager.logInfo("Server", "CustomWebDAVServer initialized on port $port")
+        logManager.logInfo(
+            "Server",
+            "CustomWebDAVServer initialized on port $port with username: ${if (username.isNotEmpty()) "set" else "not set"}, allowAnonymous: $allowAnonymous",
+        )
     }
 
     override fun serve(session: IHTTPSession): Response {

@@ -15,6 +15,8 @@ class WebDAVHandler(
     private val rootDir: File,
     private val settingsManager: SettingsManager,
     private val logManager: LogManager,
+    private val serverUsername: String = "",
+    private val serverPassword: String = "",
 ) {
     private val webdavUtils = WebDAVUtils()
     private val failedAttempts = ConcurrentHashMap<String, AttemptTracker>()
@@ -141,8 +143,20 @@ class WebDAVHandler(
             val decodedCredentials = String(Base64.decode(encodedCredentials, Base64.DEFAULT))
             val parts = decodedCredentials.split(":", limit = 2)
 
-            val username = runBlocking { settingsManager.username.first() }
-            val password = runBlocking { settingsManager.password.first() }
+            // 优先使用服务器传递的用户名和密码
+            val username =
+                if (serverUsername.isNotEmpty()) {
+                    serverUsername
+                } else {
+                    runBlocking { settingsManager.username.first() }
+                }
+            val password =
+                if (serverPassword.isNotEmpty()) {
+                    serverPassword
+                } else {
+                    runBlocking { settingsManager.password.first() }
+                }
+
             return parts.size == 2 && parts[0] == username && parts[1] == password
         } catch (e: Exception) {
             return false
