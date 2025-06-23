@@ -17,11 +17,14 @@
     
     <!-- For managing all files on Android 11+ -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" 
-        tools:ignore="ScopedStorage" />
-
-    <!-- Location permissions for WiFi SSID access -->
+        tools:ignore="ScopedStorage" />    <!-- Location permissions for WiFi SSID access -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    
+    <!-- Foreground service permissions -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -44,9 +47,15 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
+                <category android:name="android.intent.category.LAUNCHER" />            </intent-filter>
         </activity>
+
+        <!-- WebDAV后台服务 -->
+        <service
+            android:name=".service.WebDAVService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <!-- Add provider for file access -->
         <provider

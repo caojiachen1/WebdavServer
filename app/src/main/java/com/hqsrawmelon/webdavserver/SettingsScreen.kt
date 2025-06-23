@@ -125,6 +125,10 @@ fun SettingsScreen(
                         LoggingSettingsDetail(
                             settingsManager = settingsManager,
                         )
+                    SettingsItems.BACKGROUND_SERVICE.id ->
+                        BackgroundServiceSettingsDetail(
+                            settingsManager = settingsManager,
+                        )
                     SettingsItems.NETWORK_DIAGNOSTICS.id ->
                         NetworkDiagnosticsDetail(
                             networkDiagnostics = networkDiagnostics,

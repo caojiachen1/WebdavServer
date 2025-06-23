@@ -1,6 +1,10 @@
 package com.hqsrawmelon.webdavserver
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.res.Configuration
 import android.os.*
 import androidx.activity.ComponentActivity
@@ -20,10 +24,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.navigation.NavController
 import androidx.navigation.compose.*
 import com.hqsrawmelon.webdavserver.server.CustomWebDAVServer
+import com.hqsrawmelon.webdavserver.service.WebDAVService
 import com.hqsrawmelon.webdavserver.ui.theme.WebdavServerTheme
 import com.hqsrawmelon.webdavserver.utils.*
 import kotlinx.coroutines.*
@@ -40,8 +47,6 @@ class WebDAVServerViewModel(
     private val settingsManager: SettingsManager,
     private val context: android.content.Context
 ) : ViewModel() {
-    private var webServer: CustomWebDAVServer? = null
-    
     private val _isServerRunning = MutableStateFlow(false)
     val isServerRunning: StateFlow<Boolean> = _isServerRunning.asStateFlow()
     
@@ -59,10 +64,25 @@ class WebDAVServerViewModel(
         updateIpAddress()
         // Add periodic memory monitoring
         ResourceManager.addDisposable("WebDAVServerViewModel") {
-            webServer?.stop()
-            webServer = null
+            stopServer()
         }
         startMemoryMonitoring()
+        
+        // 监听服务状态
+        startServiceStatusMonitoring()
+    }
+    
+    private fun startServiceStatusMonitoring() {
+        viewModelScope.launch {
+            while (true) {
+                delay(1000) // 每秒检查一次
+                val serviceRunning = WebDAVService.isServiceRunning
+                if (_isServerRunning.value != serviceRunning) {
+                    _isServerRunning.value = serviceRunning
+                    _serverStatus.value = if (serviceRunning) "服务器运行中" else "服务器已停止"
+                }
+            }
+        }
     }
     
     private fun startMemoryMonitoring() {
@@ -85,68 +105,72 @@ class WebDAVServerViewModel(
     }
     
     suspend fun startServer(username: String, password: String, port: Int, allowAnonymous: Boolean): Boolean {
-        return withContext(Dispatchers.IO) {
-            try {
-                stopServer()
-                
-                val rootDir = File(context.getExternalFilesDir(null), "webdav")
-                if (!rootDir.exists()) {
-                    rootDir.mkdirs()
-                }
-                
-                webServer = CustomWebDAVServer(
-                    port = port,
-                    rootDir = rootDir,
-                    username = username,
-                    password = password,
-                    allowAnonymous = allowAnonymous,
-                    settingsManager = settingsManager,
+        return try {
+            // 请求通知权限
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val permission = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
                 )
-                
-                val connectionTimeout = settingsManager.connectionTimeout.first() * 1000
-                webServer?.start(connectionTimeout, false)
-                
-                _isServerRunning.value = true
-                _serverStatus.value = "服务器运行中"
-                
-                if (settingsManager.enableLogging.first()) {
-                    val logManager = LogManager(context)
-                    logManager.logInfo("Server", "WebDAV server started on port $port")
+                if (permission != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    // 权限未授予，但我们仍然尝试启动服务
+                    // 用户可以在设置中手动启用通知
                 }
-                
-                true
-            } catch (e: Exception) {
-                _serverStatus.value = "启动失败: ${e.message}"
-                if (settingsManager.enableLogging.first()) {
-                    val logManager = LogManager(context)
-                    logManager.logError("Server", "Failed to start server: ${e.message}")
-                }
-                false
             }
+            
+            val intent = Intent(context, WebDAVService::class.java).apply {
+                action = WebDAVService.ACTION_START_SERVER
+                putExtra(WebDAVService.EXTRA_USERNAME, username)
+                putExtra(WebDAVService.EXTRA_PASSWORD, password)
+                putExtra(WebDAVService.EXTRA_PORT, port)
+                putExtra(WebDAVService.EXTRA_ALLOW_ANONYMOUS, allowAnonymous)
+            }
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            
+            // 立即更新状态，不等待监听器
+            _isServerRunning.value = true
+            _serverStatus.value = "正在启动服务器..."
+            
+            true
+        } catch (e: Exception) {
+            _serverStatus.value = "启动失败: ${e.message}"
+            if (settingsManager.enableLogging.first()) {
+                val logManager = LogManager(context)
+                logManager.logError("ViewModel", "Failed to start background service: ${e.message}")
+            }
+            false
         }
     }
     
     fun stopServer() {
-        webServer?.stop()
-        webServer = null
-        _isServerRunning.value = false
-        _serverStatus.value = "服务器已停止"
-        
-        viewModelScope.launch {
-            try {
+        try {
+            val intent = Intent(context, WebDAVService::class.java).apply {
+                action = WebDAVService.ACTION_STOP_SERVER
+            }
+            context.startService(intent)
+            
+            // 立即更新状态
+            _isServerRunning.value = false
+            _serverStatus.value = "正在停止服务器..."
+            
+        } catch (e: Exception) {
+            viewModelScope.launch {
                 if (settingsManager.enableLogging.first()) {
                     val logManager = LogManager(context)
-                    logManager.logInfo("Server", "WebDAV server stopped")
+                    logManager.logError("ViewModel", "Failed to stop background service: ${e.message}")
                 }
-            } catch (e: Exception) {
-                // Ignore logging errors during shutdown
             }
         }
     }
     
     override fun onCleared() {
         super.onCleared()
-        stopServer()
+        // 不在这里停止服务，让服务独立运行
     }
 }
 
@@ -172,6 +196,14 @@ class MainActivity : ComponentActivity() {
             if (locationPermissionGranted) {
                 // Refresh network status if location permission was granted
                 // This will be handled in the UI
+            }
+            
+            // 检查通知权限
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val notificationPermissionGranted = permissions[Manifest.permission.POST_NOTIFICATIONS] == true
+                if (!notificationPermissionGranted) {
+                    // 可以在这里显示一个说明，告诉用户为什么需要通知权限
+                }
             }
         }
 
@@ -263,6 +295,11 @@ class MainActivity : ComponentActivity() {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         add(Manifest.permission.ACCESS_FINE_LOCATION)
                         add(Manifest.permission.ACCESS_COARSE_LOCATION)
+                    }
+                    
+                    // Add notification permission for Android 13+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        add(Manifest.permission.POST_NOTIFICATIONS)
                     }
                 }.toTypedArray()
 
@@ -677,16 +714,13 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.padding(16.dp),
                         ) {
                             Text(
-                                text = "快速开始",
+                                text = "后台运行",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "1. 确保设备连接到WiFi网络\n" +
-                                        "2. 在设置中配置用户名和密码\n" +
-                                        "3. 点击启动服务器按钮\n" +
-                                        "4. 使用WebDAV客户端连接",
+                                text = "• 服务器将在后台持续运行\n• 可通过通知栏控制启动停止\n• 关闭应用不会停止服务器\n• 重启手机后需要重新启动服务器",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -743,6 +777,18 @@ class MainActivity : ComponentActivity() {
                     fontWeight = FontWeight.Medium,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
+                
+                // 添加后台服务状态指示
+                if (isServerRunning) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "后台运行中",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF4CAF50),
+                        fontWeight = FontWeight.Normal,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
 
                 if (isServerRunning && ipAddress.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(20.dp))
@@ -872,5 +918,16 @@ class MainActivity : ComponentActivity() {
         this.unregisterFromResourceManagement()
         super.onDestroy()
         // ViewModel 会自动处理清理
+        // 注意：不在这里停止服务，让服务独立运行
+    }
+    
+    override fun onPause() {
+        super.onPause()
+        // 当应用进入后台时，服务继续运行
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // 当应用恢复时，刷新服务状态
     }
 }

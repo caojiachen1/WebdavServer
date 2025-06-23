@@ -86,6 +86,16 @@ class SettingsManager(
     private val _maxLogSize = MutableStateFlow(prefs.getInt("max_log_size", 10))
     val maxLogSize: StateFlow<Int> = _maxLogSize.asStateFlow()
 
+    // Background service settings
+    private val _enableBackgroundService = MutableStateFlow(prefs.getBoolean("enable_background_service", true))
+    val enableBackgroundService: StateFlow<Boolean> = _enableBackgroundService.asStateFlow()
+
+    private val _autoStartOnBoot = MutableStateFlow(prefs.getBoolean("auto_start_on_boot", false))
+    val autoStartOnBoot: StateFlow<Boolean> = _autoStartOnBoot.asStateFlow()
+
+    private val _showNotificationControls = MutableStateFlow(prefs.getBoolean("show_notification_controls", true))
+    val showNotificationControls: StateFlow<Boolean> = _showNotificationControls.asStateFlow()
+
     /**
      * 批量更新方法 - 优化性能
      */
@@ -222,6 +232,22 @@ class SettingsManager(
         scheduleUpdate("max_log_size", value)
     }
 
+    // Background service settings update methods
+    fun updateEnableBackgroundService(value: Boolean) {
+        _enableBackgroundService.value = value
+        scheduleUpdate("enable_background_service", value)
+    }
+
+    fun updateAutoStartOnBoot(value: Boolean) {
+        _autoStartOnBoot.value = value
+        scheduleUpdate("auto_start_on_boot", value)
+    }
+
+    fun updateShowNotificationControls(value: Boolean) {
+        _showNotificationControls.value = value
+        scheduleUpdate("show_notification_controls", value)
+    }
+
     /**
      * 批量更新多个设置 - 性能优化
      */
@@ -276,6 +302,9 @@ class SettingsManager(
             "enable_logging" -> if (value is Boolean) _enableLogging.value = value
             "log_level" -> if (value is String) _logLevel.value = value
             "max_log_size" -> if (value is Int) _maxLogSize.value = value
+            "enable_background_service" -> if (value is Boolean) _enableBackgroundService.value = value
+            "auto_start_on_boot" -> if (value is Boolean) _autoStartOnBoot.value = value
+            "show_notification_controls" -> if (value is Boolean) _showNotificationControls.value = value
         }
     }
 

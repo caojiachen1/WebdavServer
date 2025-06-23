@@ -60,6 +60,14 @@ object SettingsItems {
             icon = Icons.AutoMirrored.Filled.Article,
         )
 
+    val BACKGROUND_SERVICE =
+        SettingsItem(
+            id = "background_service",
+            title = "后台服务",
+            description = "后台运行和通知设置",
+            icon = Icons.Default.Notifications,
+        )
+
     val NETWORK_DIAGNOSTICS =
         SettingsItem(
             id = "network_diagnostics",
@@ -95,6 +103,7 @@ object SettingsItems {
             ADVANCED,
             SECURITY,
             LOGGING,
+            BACKGROUND_SERVICE,
             NETWORK_DIAGNOSTICS,
             BACKUP_TOOLS,
             ABOUT,
