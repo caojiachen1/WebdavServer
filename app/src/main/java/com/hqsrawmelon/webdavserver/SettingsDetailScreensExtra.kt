@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -13,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -469,17 +471,58 @@ fun LoggingSettingsDetail(settingsManager: SettingsManager) {
                 if (isLoadingLogs) {
                     Box(
                         contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp),
                     ) {
                         CircularProgressIndicator()
                     }
                 } else {
-                    SelectionContainer {
-                        Text(
-                            text = if (logContent.isEmpty()) "暂无日志内容" else logContent,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                    // 支持下滑功能的日志查看区域
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp)
+                    ) {
+                        if (logContent.isEmpty()) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                Text(
+                                    text = "暂无日志内容",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else {
+                            SelectionContainer {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(4.dp), 
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    // 将日志按行分割并显示
+                                    val logLines = logContent.split('\n').filter { it.isNotBlank() }
+                                    items(logLines) { line ->
+                                        Text(
+                                            text = line,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 1.dp),
+                                            color = when {
+                                                line.contains("ERROR") -> MaterialTheme.colorScheme.error
+                                                line.contains("WARN") -> Color(0xFFFF9800)
+                                                line.contains("INFO") -> MaterialTheme.colorScheme.primary
+                                                line.contains("DEBUG") -> MaterialTheme.colorScheme.onSurfaceVariant
+                                                else -> MaterialTheme.colorScheme.onSurface
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             },
