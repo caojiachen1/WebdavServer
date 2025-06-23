@@ -29,9 +29,105 @@ import com.hqsrawmelon.webdavserver.utils.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.*
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+
+/**
+ * WebDAV 服务器状态管理 ViewModel
+ */
+class WebDAVServerViewModel(
+    private val settingsManager: SettingsManager,
+    private val context: android.content.Context
+) : ViewModel() {
+    private var webServer: CustomWebDAVServer? = null
+    
+    private val _isServerRunning = MutableStateFlow(false)
+    val isServerRunning: StateFlow<Boolean> = _isServerRunning.asStateFlow()
+    
+    private val _serverStatus = MutableStateFlow("服务器已停止")
+    val serverStatus: StateFlow<String> = _serverStatus.asStateFlow()
+    
+    private val _ipAddress = MutableStateFlow("")
+    val ipAddress: StateFlow<String> = _ipAddress.asStateFlow()
+    
+    init {
+        updateIpAddress()
+    }
+    
+    private fun updateIpAddress() {
+        viewModelScope.launch {
+            _ipAddress.value = getLocalIpAddress(context)
+        }
+    }
+    
+    suspend fun startServer(username: String, password: String, port: Int, allowAnonymous: Boolean): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                stopServer()
+                
+                val rootDir = File(context.getExternalFilesDir(null), "webdav")
+                if (!rootDir.exists()) {
+                    rootDir.mkdirs()
+                }
+                
+                webServer = CustomWebDAVServer(
+                    port = port,
+                    rootDir = rootDir,
+                    username = username,
+                    password = password,
+                    allowAnonymous = allowAnonymous,
+                    settingsManager = settingsManager,
+                )
+                
+                val connectionTimeout = settingsManager.connectionTimeout.first() * 1000
+                webServer?.start(connectionTimeout, false)
+                
+                _isServerRunning.value = true
+                _serverStatus.value = "服务器运行中"
+                
+                if (settingsManager.enableLogging.first()) {
+                    val logManager = LogManager(context)
+                    logManager.logInfo("Server", "WebDAV server started on port $port")
+                }
+                
+                true
+            } catch (e: Exception) {
+                _serverStatus.value = "启动失败: ${e.message}"
+                if (settingsManager.enableLogging.first()) {
+                    val logManager = LogManager(context)
+                    logManager.logError("Server", "Failed to start server: ${e.message}")
+                }
+                false
+            }
+        }
+    }
+    
+    fun stopServer() {
+        webServer?.stop()
+        webServer = null
+        _isServerRunning.value = false
+        _serverStatus.value = "服务器已停止"
+        
+        viewModelScope.launch {
+            try {
+                if (settingsManager.enableLogging.first()) {
+                    val logManager = LogManager(context)
+                    logManager.logInfo("Server", "WebDAV server stopped")
+                }
+            } catch (e: Exception) {
+                // Ignore logging errors during shutdown
+            }
+        }
+    }
+    
+    override fun onCleared() {
+        super.onCleared()
+        stopServer()
+    }
+}
 
 class MainActivity : ComponentActivity() {
-    private var webServer: CustomWebDAVServer? = null
     private lateinit var settingsManager: SettingsManager
     private lateinit var networkDiagnostics: NetworkDiagnostics
     
@@ -177,11 +273,16 @@ class MainActivity : ComponentActivity() {
         val webdavRootDir = remember { File(getExternalFilesDir(null), "webdav") }
         val scope = rememberCoroutineScope()
 
-        // Move server state to this level to persist across tab switches
-        var isServerRunning by remember { mutableStateOf(false) }
-        var serverStatus by remember { mutableStateOf("服务器已停止") }
-
-        // Collect settings from SettingsManager
+        // 使用 ViewModel 管理服务器状态
+        val viewModel = remember { 
+            WebDAVServerViewModel(settingsManager, this@MainActivity) 
+        }
+        
+        // Collect states from ViewModel and SettingsManager
+        val isServerRunning by viewModel.isServerRunning.collectAsState()
+        val serverStatus by viewModel.serverStatus.collectAsState()
+        val ipAddress by viewModel.ipAddress.collectAsState()
+        
         val username by settingsManager.username.collectAsState()
         val password by settingsManager.password.collectAsState()
         val serverPort by settingsManager.serverPort.collectAsState()
@@ -373,14 +474,14 @@ class MainActivity : ComponentActivity() {
                     when (currentPage) {
                         0 ->
                             WebDAVServerApp(
-                                isServerRunning = isServerRunning,
-                                onServerRunningChange = { isServerRunning = it },
-                                serverStatus = serverStatus,
-                                onServerStatusChange = { serverStatus = it },
+                                viewModel = viewModel,
                                 username = username,
                                 password = password,
                                 serverPort = serverPort,
                                 allowAnonymous = allowAnonymous,
+                                ipAddress = ipAddress,
+                                isServerRunning = isServerRunning,
+                                serverStatus = serverStatus,
                             )
                         1 ->
                             FileManagerScreen(
@@ -414,21 +515,53 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
     @Composable
     fun WebDAVServerApp(
-        isServerRunning: Boolean,
-        onServerRunningChange: (Boolean) -> Unit,
-        serverStatus: String,
-        onServerStatusChange: (String) -> Unit,
+        viewModel: WebDAVServerViewModel,
         username: String,
         password: String,
         serverPort: Int,
         allowAnonymous: Boolean,
+        ipAddress: String,
+        isServerRunning: Boolean,
+        serverStatus: String,
     ) {
-        var ipAddress by remember { mutableStateOf("") }
         val scope = rememberCoroutineScope()
 
         LaunchedEffect(Unit) {
-            ipAddress = getLocalIpAddress(this@MainActivity)
+            if (!File(getExternalFilesDir(null), "webdav").exists()) {
+                File(getExternalFilesDir(null), "webdav").mkdirs()
+            }
         }
+
+        ServerStatusCard(
+            isServerRunning = isServerRunning,
+            serverStatus = serverStatus,
+            ipAddress = ipAddress,
+            serverPort = serverPort,
+            allowAnonymous = allowAnonymous,
+            username = username,
+            onServerToggle = {
+                scope.launch {
+                    if (isServerRunning) {
+                        viewModel.stopServer()
+                    } else {
+                        viewModel.startServer(username, password, serverPort, allowAnonymous)
+                    }
+                }
+            }
+        )
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun ServerStatusCard(
+        isServerRunning: Boolean,
+        serverStatus: String,
+        ipAddress: String,
+        serverPort: Int,
+        allowAnonymous: Boolean,
+        username: String,
+        onServerToggle: () -> Unit
+    ) {
 
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -441,188 +574,134 @@ class MainActivity : ComponentActivity() {
                         fontWeight = FontWeight.Bold,
                     )
                 },
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    ),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
             )
 
             Column(
-                modifier =
-                    Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 // Server Status Card
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                ) {
-                    Column(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        // Status Icon
-                        Icon(
-                            imageVector = if (isServerRunning) Icons.Default.CheckCircleOutline else Icons.Default.Stop,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = if (isServerRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Text(
-                            text = "服务器状态",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = serverStatus,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (isServerRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        )
-
-                        if (isServerRunning && ipAddress.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            HorizontalDivider()
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            Text(
-                                text = "连接信息",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Card(
-                                colors =
-                                    CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    ),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(16.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                ) {
-                                    Text(
-                                        text = "访问地址",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    )
-                                    Text(
-                                        text = "http://$ipAddress:$serverPort",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    )
-
-                                    Spacer(modifier = Modifier.height(8.dp))
-
-                                    Text(
-                                        text =
-                                            if (allowAnonymous) {
-                                                "访问模式: 匿名访问"
-                                            } else {
-                                                "用户名: $username"
-                                            },
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                ServerInfoCard(
+                    isServerRunning = isServerRunning,
+                    serverStatus = serverStatus,
+                    ipAddress = ipAddress,
+                    serverPort = serverPort,
+                    allowAnonymous = allowAnonymous,
+                    username = username
+                )
 
                 // Control Button
-                Button(
-                    onClick = {
-                        scope.launch {
-                            if (isServerRunning) {
-                                stopServer()
-                                onServerRunningChange(false)
-                                onServerStatusChange("服务器已停止")
-                            } else {
-                                val success = startServer(username, password, serverPort, allowAnonymous)
-                                if (success) {
-                                    onServerRunningChange(true)
-                                    onServerStatusChange("服务器运行中")
-                                } else {
-                                    onServerStatusChange("启动失败")
-                                }
-                            }
-                        }
-                    },
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                    colors =
-                        ButtonDefaults.buttonColors(
-                            containerColor =
-                                if (isServerRunning) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.primary
-                                },
-                        ),
-                ) {
-                    Icon(
-                        imageVector = if (isServerRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = if (isServerRunning) "停止服务器" else "启动服务器",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                ServerControlButton(
+                    isServerRunning = isServerRunning,
+                    onToggle = onServerToggle
+                )
 
                 // Quick Access Info
                 if (!isServerRunning) {
+                    QuickStartCard()
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ServerInfoCard(
+        isServerRunning: Boolean,
+        serverStatus: String,
+        ipAddress: String,
+        serverPort: Int,
+        allowAnonymous: Boolean,
+        username: String
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                // Status Icon
+                Icon(
+                    imageVector = if (isServerRunning) Icons.Default.CheckCircleOutline else Icons.Default.Stop,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = if (isServerRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "服务器状态",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = serverStatus,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (isServerRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+
+                if (isServerRunning && ipAddress.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "连接信息",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        ),
                         modifier = Modifier.fillMaxWidth(),
-                        colors =
-                            CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            ),
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(
-                                text = "快速开始",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text =
-                                    "1. 确保设备连接到WiFi网络\n" +
-                                        "2. 在设置中配置用户名和密码\n" +
-                                        "3. 点击启动服务器按钮\n" +
-                                        "4. 使用WebDAV客户端连接",
+                                text = "访问地址",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Text(
+                                text = "http://$ipAddress:$serverPort",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = if (allowAnonymous) {
+                                    "访问模式: 匿名访问"
+                                } else {
+                                    "用户名: $username"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
                         }
                     }
@@ -631,81 +710,72 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private suspend fun startServer(
-        username: String,
-        password: String,
-        port: Int,
-        allowAnonymous: Boolean = false,
-    ): Boolean =
-        withContext(Dispatchers.IO) {
-            try {
-                stopServer() // Stop any existing server
-
-                val rootDir = File(getExternalFilesDir(null), "webdav")
-                if (!rootDir.exists()) {
-                    rootDir.mkdirs()
-                }
-
-                webServer =
-                    CustomWebDAVServer(
-                        port = port,
-                        rootDir = rootDir,
-                        username = username,
-                        password = password,
-                        allowAnonymous = allowAnonymous,
-                        settingsManager = settingsManager,
-                    )
-
-                // Apply connection timeout and max connections from settings
-                val connectionTimeout = settingsManager.connectionTimeout.first() * 1000 // Convert to milliseconds
-                val maxConnections = settingsManager.maxConnections.first()
-
-                // Start server with custom timeout
-                webServer?.start(connectionTimeout, false)
-
-                // Log server start
-                if (settingsManager.enableLogging.first()) {
-                    val logManager = LogManager(this@MainActivity)
-                    logManager.logInfo(
-                        "Server",
-                        "WebDAV server started on port $port with timeout ${connectionTimeout}ms and max $maxConnections connections",
-                    )
-                }
-
-                true
-            } catch (e: IOException) {
-                e.printStackTrace()
-
-                // Log error
-                if (settingsManager.enableLogging.first()) {
-                    val logManager = LogManager(this@MainActivity)
-                    logManager.logError("Server", "Failed to start server: ${e.message}")
-                }
-
-                false
-            }
-        }
-
-    private fun stopServer() {
-        webServer?.stop()
-        webServer = null
-
-        // Log server stop
-        try {
-            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                if (settingsManager.enableLogging.first()) {
-                    val logManager = LogManager(this@MainActivity)
-                    logManager.logInfo("Server", "WebDAV server stopped")
-                }
-            }
-        } catch (e: Exception) {
-            // Ignore logging errors during shutdown
+    @Composable
+    private fun ServerControlButton(
+        isServerRunning: Boolean,
+        onToggle: () -> Unit
+    ) {
+        Button(
+            onClick = onToggle,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isServerRunning) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+            ),
+        ) {
+            Icon(
+                imageVector = if (isServerRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = if (isServerRunning) "停止服务器" else "启动服务器",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 
+    @Composable
+    private fun QuickStartCard() {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+            ) {
+                Text(
+                    text = "快速开始",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "1. 确保设备连接到WiFi网络\n" +
+                            "2. 在设置中配置用户名和密码\n" +
+                            "3. 点击启动服务器按钮\n" +
+                            "4. 使用WebDAV客户端连接",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
+    // 移除原有的 startServer 和 stopServer 方法，它们现在在 ViewModel 中
+
     override fun onDestroy() {
         super.onDestroy()
-        stopServer()
+        // ViewModel 会自动处理清理
     }
 
     @Composable

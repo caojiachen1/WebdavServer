@@ -25,6 +25,7 @@ import kotlinx.coroutines.*
 import java.io.*
 import java.text.SimpleDateFormat
 import java.util.*
+import com.hqsrawmelon.webdavserver.utils.PerformanceUtils
 
 data class FileItem(
     val file: File,
@@ -33,6 +34,134 @@ data class FileItem(
     val size: Long = if (file.isDirectory) 0 else file.length(),
     val lastModified: Long = file.lastModified(),
 )
+
+/**
+ * 文件管理器状态管理
+ */
+@Stable
+class FileManagerState(
+    private val rootDir: File,
+    private val coroutineScope: CoroutineScope
+) {
+    private val _currentDirectory = mutableStateOf(rootDir)
+    val currentDirectory: State<File> = _currentDirectory
+    
+    private val _files = mutableStateOf<List<FileItem>>(emptyList())
+    val files: State<List<FileItem>> = _files
+    
+    private val _isLoading = mutableStateOf(false)
+    val isLoading: State<Boolean> = _isLoading
+    
+    private val debouncer = PerformanceUtils.Debouncer(150L)
+    
+    init {
+        loadFiles()
+    }
+    
+    fun navigateToDirectory(directory: File) {
+        if (directory.exists() && directory.isDirectory) {
+            _currentDirectory.value = directory
+            loadFiles()
+        }
+    }
+    
+    fun navigateUp() {
+        val parent = currentDirectory.value.parentFile
+        if (parent != null && parent.path.startsWith(rootDir.path)) {
+            navigateToDirectory(parent)
+        }
+    }
+    
+    fun refresh() {
+        debouncer.debounce(coroutineScope) {
+            loadFiles()
+        }
+    }
+    
+    private fun loadFiles() {
+        coroutineScope.launch {
+            _isLoading.value = true
+            try {
+                val cacheKey = "files_${currentDirectory.value.absolutePath}"
+                val loadedFiles = PerformanceUtils.getCached(cacheKey) {
+                    loadFilesInternal(currentDirectory.value)
+                }
+                _files.value = loadedFiles
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _files.value = emptyList()
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    private suspend fun loadFilesInternal(directory: File): List<FileItem> = 
+        withContext(Dispatchers.IO) {
+            try {
+                directory.listFiles()
+                    ?.map { file -> FileItem(file) }
+                    ?.sortedWith(
+                        compareBy<FileItem> { !it.isDirectory }
+                            .thenBy { it.name.lowercase() }
+                    ) ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    
+    suspend fun createFolder(folderName: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val newFolder = File(currentDirectory.value, folderName)
+                val success = newFolder.mkdirs()
+                if (success) {
+                    // 清除缓存以强制刷新
+                    PerformanceUtils.clearCache("files_${currentDirectory.value.absolutePath}")
+                    loadFiles()
+                }
+                success
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+    
+    suspend fun renameFile(file: File, newName: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val newFile = File(file.parent, newName)
+                val success = file.renameTo(newFile)
+                if (success) {
+                    PerformanceUtils.clearCache("files_${currentDirectory.value.absolutePath}")
+                    loadFiles()
+                }
+                success
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+    
+    suspend fun deleteFile(file: File): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val success = if (file.isDirectory) {
+                    file.deleteRecursively()
+                } else {
+                    file.delete()
+                }
+                if (success) {
+                    PerformanceUtils.clearCache("files_${currentDirectory.value.absolutePath}")
+                    loadFiles()
+                }
+                success
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class, ExperimentalAnimationApi::class)
 @Composable
