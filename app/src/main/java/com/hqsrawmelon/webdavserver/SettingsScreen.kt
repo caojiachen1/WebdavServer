@@ -30,6 +30,12 @@ fun SettingsScreen(
 ) {
     // Navigation state
     var currentScreen by remember { mutableStateOf<String?>(null) }
+    
+    // 添加返回键处理，当在详情界面时返回主设置界面
+    BackHandler(enabled = currentScreen != null) {
+        currentScreen = null
+    }
+    
     Column(
         modifier = Modifier.fillMaxSize(),
     ) {

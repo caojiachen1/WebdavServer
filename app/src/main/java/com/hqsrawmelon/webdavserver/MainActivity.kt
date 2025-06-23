@@ -34,6 +34,12 @@ class MainActivity : ComponentActivity() {
     private var webServer: CustomWebDAVServer? = null
     private lateinit var settingsManager: SettingsManager
     private lateinit var networkDiagnostics: NetworkDiagnostics
+    
+    // 用于控制返回行为的状态
+    private var backPressedTime = 0L
+    private val backPressedToast by lazy {
+        android.widget.Toast.makeText(this, "再按一次退出应用", android.widget.Toast.LENGTH_SHORT)
+    }
 
     private val requestPermissionLauncher =
         registerForActivityResult(
@@ -145,6 +151,11 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun MainApp() {
         val navController = rememberNavController()
+        
+        // 设置返回键处理 - 只处理子页面的返回
+        BackHandler(enabled = navController.previousBackStackEntry != null) {
+            navController.popBackStack()
+        }
 
         NavHost(
             navController = navController,
@@ -180,6 +191,17 @@ class MainActivity : ComponentActivity() {
         var currentDirectory by remember { mutableStateOf(webdavRootDir) }
         var refreshTrigger by remember { mutableStateOf(0) }
         val context = LocalContext.current
+        
+        // 添加主页面返回逻辑 - 双击退出应用
+        BackHandler {
+            if (System.currentTimeMillis() - backPressedTime < 2000) {
+                backPressedToast.cancel()
+                finish()
+            } else {
+                backPressedTime = System.currentTimeMillis()
+                backPressedToast.show()
+            }
+        }
 
         // File picker launcher for file manager
         val filePickerLauncher =

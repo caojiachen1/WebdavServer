@@ -1,5 +1,6 @@
 package com.hqsrawmelon.webdavserver
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -130,6 +131,11 @@ fun FileManagerScreen(
     LaunchedEffect(currentDirectory, refreshTrigger) {
         // Always reload files when directory changes or refresh is triggered
         files = loadFiles(currentDirectory)
+    }
+    
+    // 添加返回键处理，当不在根目录时返回上级目录
+    BackHandler(enabled = currentDirectory != rootDir) {
+        onDirectoryChange(currentDirectory.parentFile ?: rootDir)
     }
 
     Column(
