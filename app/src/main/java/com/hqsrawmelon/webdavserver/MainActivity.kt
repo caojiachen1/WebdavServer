@@ -454,113 +454,58 @@ class MainActivity : ComponentActivity() {
                 webdavRootDir.mkdirs()
             }
         }
-        Scaffold(modifier = Modifier.fillMaxSize(), bottomBar = {
-            NavigationBar(
+        Scaffold(modifier = Modifier.fillMaxSize(), bottomBar = {            NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 contentColor = MaterialTheme.colorScheme.onSurface,
-            ) {
-                NavigationBarItem(
-                    selected = pagerState.currentPage == 0,
-                    onClick = {
-                        scope.launch {
-                            pagerState.animateScrollToPage(0)
-                        }
-                    },
-                    icon = {
-                        AnimatedContent(
-                            targetState = pagerState.currentPage == 0,
-                            transitionSpec = {
-                                scaleIn(animationSpec = tween(200)) togetherWith scaleOut(animationSpec = tween(200))
-                            },
-                            label = "server_icon",
-                        ) { isSelected ->
-                            Icon(
-                                if (isSelected) Icons.Default.PlayArrow else Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                modifier = Modifier.size(if (isSelected) 28.dp else 24.dp),
-                            )
-                        }
-                    },
-                    label = {
-                        Text(
-                            "服务器",
-                            style =
-                                if (pagerState.currentPage == 0) {
+            ) {                val navItems = listOf(
+                    Triple("服务器", Icons.Default.Cloud, Icons.Default.CloudQueue),
+                    Triple("文件管理", Icons.Default.Folder, Icons.Default.FolderOpen),
+                    Triple("设置", Icons.Default.Settings, Icons.Default.Settings)
+                )
+                
+                navItems.forEachIndexed { index, (label, selectedIcon, unselectedIcon) ->
+                    NavigationBarItem(
+                        selected = pagerState.currentPage == index,
+                        onClick = {
+                            scope.launch {
+                                pagerState.animateScrollToPage(index)
+                            }
+                        },
+                        icon = {
+                            AnimatedContent(
+                                targetState = pagerState.currentPage == index,
+                                transitionSpec = {
+                                    scaleIn(animationSpec = tween(200)) + fadeIn() togetherWith
+                                    scaleOut(animationSpec = tween(200)) + fadeOut()
+                                },
+                                label = "${label}_icon",
+                            ) { isSelected ->
+                                Icon(
+                                    imageVector = if (isSelected) selectedIcon else unselectedIcon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(if (isSelected) 28.dp else 24.dp),
+                                )
+                            }
+                        },
+                        label = {
+                            Text(
+                                text = label,
+                                style = if (pagerState.currentPage == index) {
                                     MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                                 } else {
                                     MaterialTheme.typography.labelMedium
                                 },
-                        )
-                    },
-                )
-                NavigationBarItem(
-                    selected = pagerState.currentPage == 1,
-                    onClick = {
-                        scope.launch {
-                            pagerState.animateScrollToPage(1)
-                        }
-                    },
-                    icon = {
-                        AnimatedContent(
-                            targetState = pagerState.currentPage == 1,
-                            transitionSpec = {
-                                scaleIn(animationSpec = tween(200)) togetherWith scaleOut(animationSpec = tween(200))
-                            },
-                            label = "file_icon",
-                        ) { isSelected ->
-                            Icon(
-                                if (isSelected) Icons.Default.Folder else Icons.Default.FolderOpen,
-                                contentDescription = null,
-                                modifier = Modifier.size(if (isSelected) 28.dp else 24.dp),
                             )
-                        }
-                    },
-                    label = {
-                        Text(
-                            "文件管理",
-                            style =
-                                if (pagerState.currentPage == 1) {
-                                    MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                                } else {
-                                    MaterialTheme.typography.labelMedium
-                                },
+                        },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    },
-                )
-                NavigationBarItem(
-                    selected = pagerState.currentPage == 2,
-                    onClick = {
-                        scope.launch {
-                            pagerState.animateScrollToPage(2)
-                        }
-                    },
-                    icon = {
-                        AnimatedContent(
-                            targetState = pagerState.currentPage == 2,
-                            transitionSpec = {
-                                scaleIn(animationSpec = tween(200)) togetherWith scaleOut(animationSpec = tween(200))
-                            },
-                            label = "settings_icon",
-                        ) { isSelected ->
-                            Icon(
-                                if (isSelected) Icons.Default.Settings else Icons.Default.Settings,
-                                contentDescription = null,
-                                modifier = Modifier.size(if (isSelected) 28.dp else 24.dp),
-                            )
-                        }
-                    },
-                    label = {
-                        Text(
-                            "设置",
-                            style =
-                                if (pagerState.currentPage == 2) {
-                                    MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                                } else {
-                                    MaterialTheme.typography.labelMedium
-                                },
-                        )
-                    },
-                )
+                    )
+                }
             }
         }) { innerPadding ->
             HorizontalPager(
@@ -680,289 +625,408 @@ class MainActivity : ComponentActivity() {
         memoryInfo: ResourceManager.MemoryInfo,
         onServerToggle: () -> Unit,
     ) {
+        val animatedColor by animateColorAsState(
+            targetValue = if (isServerRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
+            animationSpec = tween(500),
+            label = "color_animation"
+        )
+        
         Column(
             modifier = Modifier.fillMaxSize(),
         ) {
-            // Top bar - always present
+            // Modern Top Bar with gradient background
             TopAppBar(
                 title = {
-                    Text(
-                        text = "WebDAV 服务器",
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Cloud,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "WebDAV 服务器",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.headlineSmall
+                        )
+                    }
                 },
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    ),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
             )
 
             Column(
-                modifier =
-                    Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(24.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                // Server Status Card
-                ServerInfoCard(
-                    isServerRunning = isServerRunning,
-                    serverStatus = serverStatus,
-                    ipAddress = ipAddress,
-                    serverPort = serverPort,
-                    allowAnonymous = allowAnonymous,
-                    username = username,
-                    memoryInfo = memoryInfo,
-                )
-
-                // Control Button
-                Button(
-                    onClick = onServerToggle,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                    colors =
-                        ButtonDefaults.buttonColors(
-                            containerColor =
-                                if (isServerRunning) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.primary
-                                },
-                        ),
+                // Enhanced Server Status Card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isServerRunning) 
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                        else 
+                            MaterialTheme.colorScheme.surface
+                    )
                 ) {
-                    Icon(
-                        imageVector = if (isServerRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = if (isServerRunning) "停止服务器" else "启动服务器",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-
-                // Quick Access Info
-                if (!isServerRunning) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors =
-                            CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            ),
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                        ) {
+                        // Animated Status Icon
+                        AnimatedContent(
+                            targetState = isServerRunning,
+                            transitionSpec = {
+                                scaleIn(animationSpec = tween(300)) + fadeIn() togetherWith
+                                scaleOut(animationSpec = tween(300)) + fadeOut()
+                            },
+                            label = "status_icon_animation"
+                        ) { running ->
+                            Icon(
+                                imageVector = if (running) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                contentDescription = null,
+                                modifier = Modifier.size(72.dp),
+                                tint = animatedColor
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(
+                            text = "服务器状态",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Animated status text - centered
+                        AnimatedContent(
+                            targetState = serverStatus,
+                            transitionSpec = {
+                                slideInVertically { it } + fadeIn() togetherWith
+                                slideOutVertically { -it } + fadeOut()
+                            },
+                            label = "status_text_animation",
+                            modifier = Modifier.fillMaxWidth()
+                        ) { status ->
                             Text(
-                                text = "后台运行",
+                                text = status,
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
+                                color = animatedColor,
+                                fontWeight = FontWeight.Medium,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "• 服务器将在后台持续运行\n• 可通过通知栏控制启动停止\n• 关闭应用不会停止服务器\n• 重启手机后需要重新启动服务器",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                        }
+
+                        if (isServerRunning) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            // Centered status indicator
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Verified,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = Color(0xFF4CAF50)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "后台运行中",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF4CAF50),
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
                         }
                     }
                 }
-            }
-        }
-    }
 
-    @Composable
-    private fun ServerInfoCard(
-        isServerRunning: Boolean,
-        serverStatus: String,
-        ipAddress: String,
-        serverPort: Int,
-        allowAnonymous: Boolean,
-        username: String,
-        memoryInfo: ResourceManager.MemoryInfo,
-    ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-        ) {
-            Column(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                // Status Icon
-                Icon(
-                    imageVector = if (isServerRunning) Icons.Default.CheckCircleOutline else Icons.Default.Stop,
-                    contentDescription = null,
-                    modifier = Modifier.size(64.dp),
-                    tint = if (isServerRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "服务器状态",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = serverStatus,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (isServerRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                )
-
-                // 添加后台服务状态指示
-                if (isServerRunning) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "后台运行中",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF4CAF50),
-                        fontWeight = FontWeight.Normal,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
+                // Enhanced Control Button with animation
+                AnimatedContent(
+                    targetState = isServerRunning,
+                    transitionSpec = {
+                        scaleIn(animationSpec = tween(200)) + fadeIn() togetherWith
+                        scaleOut(animationSpec = tween(200)) + fadeOut()
+                    },
+                    label = "button_animation"
+                ) { running ->
+                    Button(
+                        onClick = onServerToggle,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (running) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(
+                            defaultElevation = 6.dp,
+                            pressedElevation = 12.dp
+                        )
+                    ) {
+                        Icon(
+                            imageVector = if (running) Icons.Default.Stop else Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = if (running) "停止服务器" else "启动服务器",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
 
-                if (isServerRunning && ipAddress.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(20.dp))
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "连接信息",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Card(
-                        colors =
-                            CardDefaults.cardColors(
+                // Connection info and system status when running
+                AnimatedVisibility(
+                    visible = isServerRunning && ipAddress.isNotEmpty(),
+                    enter = fadeIn(animationSpec = tween(500)) + expandVertically(),
+                    exit = fadeOut(animationSpec = tween(300)) + shrinkVertically()
+                ) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Connection Information Card
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
                                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                             ),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                         ) {
-                            Text(
-                                text = "访问地址",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                            Text(
-                                text = "http://$ipAddress:$serverPort",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
+                            Column(
+                                modifier = Modifier.padding(20.dp),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Link,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "连接信息",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.height(12.dp))
+                                
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surface
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = "访问地址",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "http://$ipAddress:$serverPort",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = if (allowAnonymous) Icons.Default.PublicOff else Icons.Default.Person,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = if (allowAnonymous) {
+                                                    "匿名访问"
+                                                } else {
+                                                    "用户名: $username"
+                                                },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Text(
-                                text =
-                                    if (allowAnonymous) {
-                                        "访问模式: 匿名访问"
-                                    } else {
-                                        "用户名: $username"
-                                    },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
+                        // System Status Card
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (memoryInfo.usagePercentage > 80) {
+                                    MaterialTheme.colorScheme.errorContainer
+                                } else {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                },
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(20.dp),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Memory,
+                                        contentDescription = null,
+                                        tint = if (memoryInfo.usagePercentage > 80) {
+                                            MaterialTheme.colorScheme.error
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "系统状态",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.height(12.dp))
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text = "内存使用:",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Text(
+                                        text = "${memoryInfo.usagePercentage}%",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (memoryInfo.usagePercentage > 80) {
+                                            MaterialTheme.colorScheme.error
+                                        } else {
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        }
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "已用: ${memoryInfo.formatUsedMemory()}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        Text(
+                                            text = "可用: ${memoryInfo.formatAvailableMemory()}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
+                }
 
-                    // Memory usage information
-                    Spacer(modifier = Modifier.height(20.dp))
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "系统状态",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
+                // Help Card when server is stopped
+                AnimatedVisibility(
+                    visible = !isServerRunning,
+                    enter = fadeIn(animationSpec = tween(500)) + expandVertically(),
+                    exit = fadeOut(animationSpec = tween(300)) + shrinkVertically()
+                ) {
                     Card(
-                        colors =
-                            CardDefaults.cardColors(
-                                containerColor =
-                                    if (memoryInfo.usagePercentage > 80) {
-                                        MaterialTheme.colorScheme.errorContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.secondaryContainer
-                                    },
-                            ),
                         modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
                         Column(
-                            modifier = Modifier.padding(16.dp),
+                            modifier = Modifier.padding(20.dp),
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "内存使用:",
-                                    style = MaterialTheme.typography.bodyMedium,
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
                                 )
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "${memoryInfo.usagePercentage}%",
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    text = "后台运行说明",
+                                    style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                 )
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(
-                                    text = "已用:",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                Text(
-                                    text = memoryInfo.formatUsedMemory(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(
-                                    text = "可用:",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                Text(
-                                    text = memoryInfo.formatAvailableMemory(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            val helpItems = listOf(
+                                "服务器将在后台持续运行",
+                                "可通过通知栏控制启动停止",
+                                "关闭应用不会停止服务器",
+                                "重启手机后需要重新启动服务器"
+                            )
+                            
+                            helpItems.forEach { item ->
+                                Row(
+                                    verticalAlignment = Alignment.Top,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "•",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                    Text(
+                                        text = item,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-    }
+        }    }
 
     override fun onDestroy() {
         // Clean up resources before calling super
