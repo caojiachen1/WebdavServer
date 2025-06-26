@@ -16,7 +16,7 @@ class SettingsManager(
 ) {
     val context = context
     private val prefs: SharedPreferences = context.getSharedPreferences("webdav_settings", Context.MODE_PRIVATE)
-    private val logManager = LogManager(context)
+    private val logManager by lazy { LogManager(context, this) }
 
     // 批量更新状态管理
     private val pendingUpdates = mutableMapOf<String, Any>()

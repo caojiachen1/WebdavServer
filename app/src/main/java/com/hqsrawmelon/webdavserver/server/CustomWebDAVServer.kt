@@ -62,15 +62,24 @@ class CustomWebDAVServer(
         try {
             val response = handleRequest(session, clientIP)
 
+            // Add Windows WebDAV compatibility headers
+            response.addHeader("MS-Author-Via", "DAV")
+            response.addHeader("DAV", "1,2,3")
+            response.addHeader("Server", "WebDAVServer/1.0")
+            
+            // Add connection management headers
+            response.addHeader("Connection", "keep-alive")
+            response.addHeader("Keep-Alive", "timeout=300, max=1000")
+
             // Add CORS headers if enabled
             val enableCors = runBlocking { settingsManager.enableCors.first() }
             if (enableCors) {
                 response.addHeader("Access-Control-Allow-Origin", "*")
                 response.addHeader(
                     "Access-Control-Allow-Methods",
-                    "GET, POST, PUT, DELETE, OPTIONS, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE",
+                    "GET, POST, PUT, DELETE, OPTIONS, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK",
                 )
-                response.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Depth, Destination")
+                response.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Depth, Destination, Lock-Token, Timeout, User-Agent, Content-Range, X-File-Size, X-File-Name")
             }
 
             return response
@@ -129,9 +138,10 @@ class CustomWebDAVServer(
             Method.PUT -> webdavHandler.handlePut(session, uri)
             Method.DELETE -> webdavHandler.handleDelete(session, uri)
             Method.OPTIONS -> webdavHandler.handleOptions(settingsManager)
-            else -> {
-                // Handle WebDAV methods
-                when (session.headers["method"] ?: method.name) {
+            Method.POST -> {
+                // Some WebDAV clients may send POST for certain operations
+                val webdavMethod = session.headers["x-http-method-override"] ?: session.headers["x-method-override"]
+                when (webdavMethod) {
                     "PROPFIND" -> webdavHandler.handlePropFind(session, uri)
                     "PROPPATCH" -> webdavHandler.handlePropPatch(uri)
                     "MKCOL" -> webdavHandler.handleMkCol(session, uri)
@@ -140,6 +150,33 @@ class CustomWebDAVServer(
                     "LOCK" -> webdavHandler.handleLock(session, uri)
                     "UNLOCK" -> webdavHandler.handleUnlock(session, uri)
                     else -> newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Method not allowed")
+                }
+            }
+            else -> {
+                // Handle WebDAV methods - check both method name and headers
+                val methodName = method.name
+                val headerMethod = session.headers["method"]
+                val actualMethod = headerMethod ?: methodName
+
+                // Log the method for debugging
+                if (enableLogging) {
+                    logManager.logInfo("WebDAV", "Processing method: $actualMethod (original: $methodName, header: $headerMethod)")
+                }
+
+                when (actualMethod) {
+                    "PROPFIND" -> webdavHandler.handlePropFind(session, uri)
+                    "PROPPATCH" -> webdavHandler.handlePropPatch(uri)
+                    "MKCOL" -> webdavHandler.handleMkCol(session, uri)
+                    "COPY" -> webdavHandler.handleCopy(session, uri)
+                    "MOVE" -> webdavHandler.handleMove(session, uri)
+                    "LOCK" -> webdavHandler.handleLock(session, uri)
+                    "UNLOCK" -> webdavHandler.handleUnlock(session, uri)
+                    else -> {
+                        if (enableLogging) {
+                            logManager.logWarn("WebDAV", "Unsupported method: $actualMethod")
+                        }
+                        newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Method not allowed: $actualMethod")
+                    }
                 }
             }
         }

@@ -1022,3 +1022,236 @@ fun NetworkDiagnosticsDetail(
         }
     }
 }
+
+/**
+ * WebDAV兼容性检测页面
+ */
+
+
+@Composable
+fun CompatibilityConfigRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+fun SimpleCompatibilityResultCard(platform: String, status: String, serverPort: Int, allowAnonymous: Boolean, username: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when (status) {
+                "完美兼容" -> MaterialTheme.colorScheme.surfaceVariant
+                "良好兼容" -> MaterialTheme.colorScheme.surfaceVariant
+                "部分兼容" -> Color(0xFFFFF3E0) // 浅橙色
+                else -> Color(0xFFFFEBEE) // 浅红色
+            }
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            // 平台名称和兼容性级别
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = platform,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                
+                SimpleCompatibilityChip(status)
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 主要结果描述
+            Text(
+                text = "当前配置${status}$platform 平台",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // 设置指南
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            var showGuide by remember { mutableStateOf(false) }
+            
+            TextButton(
+                onClick = { showGuide = !showGuide },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    if (showGuide) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(if (showGuide) "收起设置指南" else "查看设置指南")
+            }
+
+            if (showGuide) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        Text(
+                            text = "设置指南",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = generateSetupGuide(platform, serverPort, allowAnonymous, username),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SimpleCompatibilityChip(status: String) {
+    val color = when (status) {
+        "完美兼容" -> MaterialTheme.colorScheme.primary
+        "良好兼容" -> Color(0xFF4CAF50)
+        "部分兼容" -> Color(0xFFFF9800)
+        else -> Color(0xFFF44336)
+    }
+
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = color.copy(alpha = 0.12f)
+    ) {
+        Text(
+            text = status,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+    }
+}
+
+fun generateSetupGuide(platform: String, serverPort: Int, allowAnonymous: Boolean, username: String): String {
+    val serverUrl = "http://[手机IP]:$serverPort"
+    
+    return when (platform) {
+        "Windows" -> """
+            Windows设置步骤：
+            1. 打开文件资源管理器
+            2. 右键点击"此电脑"，选择"映射网络驱动器"
+            3. 选择驱动器号（如Z:）
+            4. 输入地址：$serverUrl
+            5. ${if (allowAnonymous) "保持匿名连接" else "输入用户名和密码"}
+            6. 点击"完成"
+            
+            注意：HTTP连接可能需要修改注册表
+        """.trimIndent()
+        
+        "macOS" -> """
+            macOS设置步骤：
+            1. 打开Finder
+            2. 按 Cmd+K 或选择菜单"前往" > "连接服务器"
+            3. 输入服务器地址：$serverUrl
+            4. 点击"连接"
+            5. ${if (allowAnonymous) "选择'客人'" else "输入用户名和密码"}
+            6. 服务器将出现在边栏中
+        """.trimIndent()
+        
+        "Linux" -> """
+            Linux设置步骤：
+            方法1 - 使用davfs2：
+            1. 安装davfs2：sudo apt install davfs2
+            2. 创建挂载点：sudo mkdir /mnt/webdav
+            3. 挂载：sudo mount -t davfs $serverUrl /mnt/webdav
+            4. ${if (!allowAnonymous) "输入用户名和密码" else "直接回车使用匿名连接"}
+            
+            方法2 - 使用文件管理器：
+            1. 打开Nautilus/Dolphin等文件管理器
+            2. 在地址栏输入：$serverUrl
+            3. ${if (!allowAnonymous) "输入认证信息" else "直接连接"}
+        """.trimIndent()
+        
+        "iOS" -> """
+            iOS设置步骤：
+            1. 打开"文件"应用
+            2. 点击右上角"..."
+            3. 选择"连接服务器"
+            4. 输入服务器地址：$serverUrl
+            5. 点击"连接"
+            6. ${if (allowAnonymous) "选择'客人'连接" else "输入用户名和密码"}
+            7. 服务器将显示在"位置"中
+        """.trimIndent()
+        
+        "Android" -> """
+            Android设置步骤（以Solid Explorer为例）：
+            1. 下载并安装Solid Explorer
+            2. 点击"+"添加云存储
+            3. 选择"WebDAV"
+            4. 输入以下信息：
+               - 主机：[手机IP]
+               - 端口：$serverPort
+               - 使用HTTP
+               - ${if (!allowAnonymous) "用户名：$username\n   - 密码：[输入密码]" else "启用匿名连接"}
+            5. 点击"测试"验证连接
+            6. 保存配置
+        """.trimIndent()
+        
+        "Web浏览器" -> """
+            Web浏览器访问限制：
+            1. 现代浏览器对WebDAV支持有限
+            2. 可以尝试访问：$serverUrl
+            3. 某些浏览器可能支持基本的文件浏览
+            4. 建议使用专门的WebDAV客户端或应用
+            
+            替代方案：
+            - 使用在线WebDAV工具
+            - 安装浏览器扩展
+            - 使用支持WebDAV的在线文件管理器
+        """.trimIndent()
+        
+        "第三方客户端" -> """
+            第三方客户端通用设置：
+            连接信息：
+            - 协议：WebDAV
+            - 服务器：[手机IP]
+            - 端口：$serverPort
+            - 使用HTTP协议
+            - ${if (!allowAnonymous) "认证方式：Basic Auth\n- 用户名：$username\n- 密码：[输入密码]" else "认证方式：匿名访问"}
+            
+            推荐客户端：
+            - CyberDuck（跨平台，免费）
+            - Transmit（macOS，付费）
+            - WinSCP（Windows，免费）
+            - FileZilla（跨平台，免费，需Pro版本支持WebDAV）
+            - CloudMounter（跨平台，付费）
+        """.trimIndent()
+        
+        else -> "暂无设置指南"
+    }
+}

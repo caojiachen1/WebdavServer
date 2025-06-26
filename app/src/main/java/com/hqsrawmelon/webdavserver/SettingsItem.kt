@@ -76,6 +76,14 @@ object SettingsItems {
             icon = Icons.Default.NetworkCheck,
         )
 
+    val COMPATIBILITY_CHECK =
+        SettingsItem(
+            id = "compatibility_check",
+            title = "兼容性检测",
+            description = "多平台WebDAV客户端兼容性检测与设置指南",
+            icon = Icons.Default.DevicesOther,
+        )
+
     val BACKUP_TOOLS =
         SettingsItem(
             id = "backup_tools",
@@ -105,6 +113,7 @@ object SettingsItems {
             LOGGING,
             BACKGROUND_SERVICE,
             NETWORK_DIAGNOSTICS,
+            COMPATIBILITY_CHECK,
             BACKUP_TOOLS,
             ABOUT,
         )

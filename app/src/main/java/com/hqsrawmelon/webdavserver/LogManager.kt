@@ -9,13 +9,11 @@ import java.util.*
 
 class LogManager(
     private val context: Context,
+    private var settingsManager: SettingsManager? = null
 ) {
     // Secondary constructor for SettingsManager integration
-    constructor(settingsManager: SettingsManager) : this(settingsManager.context) {
-        this.settingsManager = settingsManager
-    }
+    constructor(settingsManager: SettingsManager) : this(settingsManager.context, settingsManager)
 
-    private var settingsManager: SettingsManager? = null
     private val logFile = File(context.getExternalFilesDir("logs"), "webdav.log")
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
 

@@ -18,13 +18,20 @@ class WebDAVUtils {
         xml.append("""<?xml version="1.0" encoding="utf-8"?>""")
         xml.append("""<D:multistatus xmlns:D="DAV:">""")
 
+        // Ensure URI ends with / for directories (except root)
+        val normalizedUri = if (file.isDirectory && !uri.endsWith("/") && uri != "/") "$uri/" else uri
+
         // Add current resource
-        xml.append(generateResourceResponse(file, uri, dateFormat))
+        xml.append(generateResourceResponse(file, normalizedUri, dateFormat))
 
         // Add children if depth > 0 and it's a directory
         if (depth != "0" && file.isDirectory) {
             file.listFiles()?.forEach { child ->
-                val childUri = if (uri.endsWith("/")) uri + child.name else "$uri/${child.name}"
+                val childUri = if (normalizedUri.endsWith("/")) {
+                    normalizedUri + child.name
+                } else {
+                    "$normalizedUri/${child.name}"
+                }
                 xml.append(generateResourceResponse(child, childUri, dateFormat))
             }
         }
@@ -42,6 +49,8 @@ class WebDAVUtils {
         val isCollection = if (file.isDirectory) "<D:collection/>" else ""
         val contentLength = if (!file.isDirectory) "<D:getcontentlength>${file.length()}</D:getcontentlength>" else ""
         val contentType = if (!file.isDirectory) "<D:getcontenttype>${getMimeTypeForFile(file.name)}</D:getcontenttype>" else ""
+        val etag = "\"${file.lastModified()}-${file.length()}\""
+        val creationDate = dateFormat.format(Date(file.lastModified()))
 
         return """
             <D:response>
@@ -50,7 +59,20 @@ class WebDAVUtils {
                     <D:prop>
                         <D:displayname>${file.name}</D:displayname>
                         <D:getlastmodified>$lastModified</D:getlastmodified>
+                        <D:creationdate>$creationDate</D:creationdate>
                         <D:resourcetype>$isCollection</D:resourcetype>
+                        <D:getetag>$etag</D:getetag>
+                        <D:supportedlock>
+                            <D:lockentry>
+                                <D:lockscope><D:exclusive/></D:lockscope>
+                                <D:locktype><D:write/></D:locktype>
+                            </D:lockentry>
+                            <D:lockentry>
+                                <D:lockscope><D:shared/></D:lockscope>
+                                <D:locktype><D:write/></D:locktype>
+                            </D:lockentry>
+                        </D:supportedlock>
+                        <D:lockdiscovery/>
                         $contentLength
                         $contentType
                     </D:prop>

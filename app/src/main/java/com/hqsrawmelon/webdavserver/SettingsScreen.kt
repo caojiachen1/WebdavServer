@@ -134,6 +134,10 @@ fun SettingsScreen(
                             networkDiagnostics = networkDiagnostics,
                             onRequestLocationPermission = onRequestLocationPermission,
                         )
+                    SettingsItems.COMPATIBILITY_CHECK.id ->
+                        CompatibilityCheckDetail(
+                            settingsManager = settingsManager,
+                        )
                     SettingsItems.BACKUP_TOOLS.id ->
                         BackupToolsDetail(
                             settingsManager = settingsManager,
