@@ -49,15 +49,19 @@ class WebDAVUtils {
         val isCollection = if (file.isDirectory) "<D:collection/>" else ""
         val contentLength = if (!file.isDirectory) "<D:getcontentlength>${file.length()}</D:getcontentlength>" else ""
         val contentType = if (!file.isDirectory) "<D:getcontenttype>${getMimeTypeForFile(file.name)}</D:getcontenttype>" else ""
-        val etag = "\"${file.lastModified()}-${file.length()}\""
+        val etag = "\"${file.lastModified().toString(16)}-${file.length().toString(16)}\""
         val creationDate = dateFormat.format(Date(file.lastModified()))
+        
+        // Windows WebDAV specific properties
+        val executable = if (file.canExecute()) "T" else "F"
+        val hidden = if (file.isHidden) "1" else "0"
 
         return """
             <D:response>
                 <D:href>$uri</D:href>
                 <D:propstat>
                     <D:prop>
-                        <D:displayname>${file.name}</D:displayname>
+                        <D:displayname>${escapeXml(file.name)}</D:displayname>
                         <D:getlastmodified>$lastModified</D:getlastmodified>
                         <D:creationdate>$creationDate</D:creationdate>
                         <D:resourcetype>$isCollection</D:resourcetype>
@@ -73,6 +77,9 @@ class WebDAVUtils {
                             </D:lockentry>
                         </D:supportedlock>
                         <D:lockdiscovery/>
+                        <D:getcontentlanguage>en</D:getcontentlanguage>
+                        <D:executable>$executable</D:executable>
+                        <D:ishidden>$hidden</D:ishidden>
                         $contentLength
                         $contentType
                     </D:prop>
@@ -80,6 +87,14 @@ class WebDAVUtils {
                 </D:propstat>
             </D:response>
             """.trimIndent()
+    }
+    
+    private fun escapeXml(text: String): String {
+        return text.replace("&", "&amp;")
+                  .replace("<", "&lt;")
+                  .replace(">", "&gt;")
+                  .replace("\"", "&quot;")
+                  .replace("'", "&#39;")
     }
 
     fun generateDirectoryListing(

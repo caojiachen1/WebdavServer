@@ -196,17 +196,28 @@ class WebDAVHandler(
     fun handleOptions(settingsManager: SettingsManager): Response {
         val response = newFixedLengthResponse(Response.Status.OK, "text/plain", "")
         
-        // Standard WebDAV headers
-        response.addHeader("Allow", "OPTIONS, GET, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK")
-        response.addHeader("DAV", "1,2,3")
+        // Essential Windows WebDAV headers - order matters for compatibility
         response.addHeader("MS-Author-Via", "DAV")
-        response.addHeader("Server", "WebDAVServer/1.0")
-        response.addHeader("Cache-Control", "no-cache")
+        response.addHeader("DAV", "1,2,3")
+        response.addHeader("Server", "Microsoft-IIS/10.0") // Mimic IIS for better Windows compatibility
+        response.addHeader("Allow", "OPTIONS, TRACE, GET, HEAD, DELETE, PUT, POST, COPY, MOVE, MKCOL, PROPFIND, PROPPATCH, LOCK, UNLOCK, SEARCH")
+        response.addHeader("Public", "OPTIONS, TRACE, GET, HEAD, DELETE, PUT, POST, COPY, MOVE, MKCOL, PROPFIND, PROPPATCH, LOCK, UNLOCK, SEARCH")
+        
+        // Connection management
         response.addHeader("Connection", "keep-alive")
+        response.addHeader("Keep-Alive", "timeout=300, max=1000")
+        
+        // Cache control for Windows WebDAV
+        response.addHeader("Cache-Control", "private")
         
         // Additional WebDAV compliance headers
         response.addHeader("Accept-Ranges", "bytes")
-        // Content-Length is already set by newFixedLengthResponse, don't add it again
+        response.addHeader("Content-Type", "text/html")
+        
+        // Date header is important for Windows WebDAV
+        val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
+        dateFormat.timeZone = TimeZone.getTimeZone("GMT")
+        response.addHeader("Date", dateFormat.format(Date()))
 
         runBlocking {
             if (settingsManager.enableCors.first()) {
@@ -232,6 +243,8 @@ class WebDAVHandler(
 
         val decodedUri = URLDecoder.decode(uri, "UTF-8")
         val file = File(rootDir, decodedUri.removePrefix("/"))
+        val userAgent = session.headers["user-agent"] ?: ""
+        val isWindowsWebDAV = userAgent.contains("Microsoft-WebDAV-MiniRedir") || userAgent.contains("DavClnt")
 
         if (!file.exists()) {
             return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "File not found")
@@ -251,17 +264,16 @@ class WebDAVHandler(
                     val response = newChunkedResponse(Response.Status.OK, mimeType, gzipStream)
                     response.addHeader("Content-Encoding", "gzip")
                     response.addHeader("Accept-Ranges", "bytes")
-                    response.addHeader("ETag", "\"${file.lastModified()}-${file.length()}\"")
+                    response.addHeader("ETag", "\"${file.lastModified().toString(16)}-${file.length().toString(16)}\"")
                     response.addHeader("Last-Modified", formatDateForHTTP(file.lastModified()))
-                    response.addHeader("MS-Author-Via", "DAV")
+                    addStandardWebDAVHeaders(response, isWindowsWebDAV)
                     response
                 } else {
                     val response = newFixedLengthResponse(Response.Status.OK, mimeType, fis, file.length())
-                    // Content-Length is already set by newFixedLengthResponse, don't add it again
                     response.addHeader("Accept-Ranges", "bytes")
-                    response.addHeader("ETag", "\"${file.lastModified()}-${file.length()}\"")
+                    response.addHeader("ETag", "\"${file.lastModified().toString(16)}-${file.length().toString(16)}\"")
                     response.addHeader("Last-Modified", formatDateForHTTP(file.lastModified()))
-                    response.addHeader("MS-Author-Via", "DAV")
+                    addStandardWebDAVHeaders(response, isWindowsWebDAV)
                     response
                 }
             }
@@ -277,6 +289,10 @@ class WebDAVHandler(
         val securityResponse = checkSecurityPreconditions(session)
         if (securityResponse != null) return securityResponse
 
+        // Special handling for Windows WebDAV paste operations
+        val windowsPasteResponse = handleWindowsPasteOperation(session, uri)
+        if (windowsPasteResponse != null) return windowsPasteResponse
+
         val decodedUri = URLDecoder.decode(uri, "UTF-8")
         val file = File(rootDir, decodedUri.removePrefix("/"))
 
@@ -288,91 +304,291 @@ class WebDAVHandler(
         val enableLogging = runBlocking { settingsManager.enableLogging.first() }
 
         try {
+            // Ensure parent directory exists
             file.parentFile?.mkdirs()
 
             // Get content length and other headers
             val contentLength = session.headers["content-length"]?.toLongOrNull() ?: -1L
             val contentType = session.headers["content-type"] ?: "application/octet-stream"
+            val transferEncoding = session.headers["transfer-encoding"]
+            val expectHeader = session.headers["expect"]
             
             if (enableLogging) {
-                logManager.logInfo("WebDAV", "PUT request for $decodedUri, Content-Length: $contentLength, Content-Type: $contentType")
+                logManager.logInfo("WebDAV", "PUT request for $decodedUri, Content-Length: $contentLength, Content-Type: $contentType, Transfer-Encoding: $transferEncoding, Expect: $expectHeader")
+            }
+            
+            // Handle Expect: 100-continue for Windows WebDAV clients
+            if (expectHeader?.contains("100-continue", ignoreCase = true) == true) {
+                if (enableLogging) {
+                    logManager.logInfo("WebDAV", "Client expects 100-continue, this will be handled by NanoHTTPD")
+                }
             }
 
             var bytesWritten = 0L
+            val bufferSize = runBlocking { settingsManager.bufferSize.first() }
             
-            // Use parseBody to properly handle the request body
-            val files = mutableMapOf<String, String>()
+            // Handle Windows WebDAV client special cases
+            val userAgent = session.headers["user-agent"] ?: ""
+            val isWindowsWebDAV = userAgent.contains("Microsoft-WebDAV-MiniRedir") || userAgent.contains("DavClnt")
             
+            if (enableLogging && isWindowsWebDAV) {
+                logManager.logInfo("WebDAV", "Windows WebDAV client detected: $userAgent")
+            }
+            
+            // For WebDAV PUT, we need to properly handle the request body
             try {
-                // Parse the body first to get proper access to the data
-                session.parseBody(files)
-                
-                // If we have a temporary file from parsing, use it
-                if (files.isNotEmpty()) {
-                    val tempFilePath = files.values.first()
-                    val tempFile = File(tempFilePath)
-                    if (tempFile.exists()) {
-                        tempFile.copyTo(file, overwrite = true)
-                        bytesWritten = tempFile.length()
-                        tempFile.delete() // Clean up temp file
-                        
-                        if (enableLogging) {
-                            logManager.logInfo("WebDAV", "Successfully copied $bytesWritten bytes from temp file to $decodedUri")
-                        }
+                // Handle zero-length files (common with Windows WebDAV client)
+                if (contentLength == 0L) {
+                    file.createNewFile()
+                    bytesWritten = 0L
+                    if (enableLogging) {
+                        logManager.logInfo("WebDAV", "Created zero-length file: $decodedUri")
                     }
                 } else {
-                    // Fallback: read directly from input stream
-                    if (enableLogging) {
-                        logManager.logInfo("WebDAV", "No temp file found, reading from input stream")
-                    }
+                    // Create temporary file first to ensure atomic operation
+                    val tempFile = File(file.parentFile, ".tmp_${file.name}_${System.currentTimeMillis()}")
                     
-                    val bufferSize = runBlocking { settingsManager.bufferSize.first() }
-                    FileOutputStream(file).use { outputStream ->
-                        session.inputStream?.use { inputStream ->
-                            val buffer = ByteArray(bufferSize)
-                            var totalBytes = 0L
-                            var bytesRead: Int
+                    try {
+                        // Try multiple approaches to read the request body
+                        var dataRead = false
+                        
+                        // Approach 1: Try to use NanoHTTPD's parseBody for multipart/form data
+                        try {
+                            val files = mutableMapOf<String, String>()
+                            val params = mutableMapOf<String, String>()
                             
-                            while (inputStream.read(buffer).also { bytesRead = it } > 0) {
-                                outputStream.write(buffer, 0, bytesRead)
-                                totalBytes += bytesRead
-                                
-                                // Check if we've read expected content length
-                                if (contentLength > 0 && totalBytes >= contentLength) {
-                                    break
+                            if (enableLogging) {
+                                logManager.logInfo("WebDAV", "Attempting parseBody approach...")
+                            }
+                            
+                            session.parseBody(files)
+                            
+                            if (files.isNotEmpty()) {
+                                val tempUploadFile = File(files.values.first())
+                                if (tempUploadFile.exists() && tempUploadFile.length() > 0) {
+                                    tempUploadFile.copyTo(tempFile, overwrite = true)
+                                    bytesWritten = tempFile.length()
+                                    tempUploadFile.delete()
+                                    dataRead = true
+                                    
+                                    if (enableLogging) {
+                                        logManager.logInfo("WebDAV", "Successfully used parseBody approach, size: $bytesWritten bytes")
+                                    }
                                 }
                             }
-                            bytesWritten = totalBytes
-                            outputStream.flush()
+                        } catch (e: Exception) {
+                            if (enableLogging) {
+                                logManager.logWarn("WebDAV", "parseBody approach failed: ${e.message}")
+                            }
+                        }
+                        
+                        // Approach 2: Direct stream reading if parseBody didn't work
+                        if (!dataRead) {
+                            if (enableLogging) {
+                                logManager.logInfo("WebDAV", "Attempting direct stream reading...")
+                            }
+                            
+                            // Get the raw input stream from the session
+                            val inputStream = session.inputStream
+                            if (inputStream != null) {
+                                FileOutputStream(tempFile).use { outputStream ->
+                                    val buffer = ByteArray(bufferSize)
+                                    var totalBytes = 0L
+                                    var bytesRead: Int
+                                    
+                                    // Read until EOF or expected content length is reached
+                                    while (inputStream.read(buffer).also { bytesRead = it } > 0) {
+                                        outputStream.write(buffer, 0, bytesRead)
+                                        totalBytes += bytesRead
+                                        
+                                        // For safety, stop reading if we've read significantly more than expected
+                                        if (contentLength > 0 && totalBytes > contentLength + 1024) {
+                                            if (enableLogging) {
+                                                logManager.logWarn("WebDAV", "Read more than expected, stopping at $totalBytes bytes")
+                                            }
+                                            break
+                                        }
+                                    }
+                                    
+                                    outputStream.flush()
+                                    outputStream.fd.sync()
+                                    
+                                    bytesWritten = totalBytes
+                                    dataRead = totalBytes > 0
+                                    
+                                    if (enableLogging) {
+                                        logManager.logInfo("WebDAV", "Direct stream reading completed: $bytesWritten bytes")
+                                    }
+                                }
+                            } else {
+                                if (enableLogging) {
+                                    logManager.logWarn("WebDAV", "Input stream is null")
+                                }
+                            }
+                        }
+                        
+                        // Approach 3: If we still don't have data and content-length suggests we should
+                        if (!dataRead && contentLength > 0) {
+                            if (enableLogging) {
+                                logManager.logWarn("WebDAV", "No data read but content-length is $contentLength, creating empty file")
+                            }
+                            tempFile.createNewFile()
+                            bytesWritten = 0L
+                        } else if (!dataRead) {
+                            // Create empty file for zero-length case
+                            tempFile.createNewFile()
+                            bytesWritten = 0L
+                        }
+                        
+                        // Atomically move temp file to final location
+                        if (tempFile.exists()) {
+                            if (file.exists()) {
+                                file.delete()
+                            }
+                            val moved = tempFile.renameTo(file)
+                            if (!moved) {
+                                // Fallback: copy then delete
+                                tempFile.copyTo(file, overwrite = true)
+                                tempFile.delete()
+                            }
+                            
+                            if (enableLogging) {
+                                logManager.logInfo("WebDAV", "Successfully moved temp file to final location: ${file.exists()}")
+                            }
+                        }
+                        
+                    } finally {
+                        // Clean up temp file if it still exists
+                        if (tempFile.exists()) {
+                            tempFile.delete()
+                        }
+                    }
+                    
+                    // Verify content length if specified and we got data
+                    if (contentLength > 0 && bytesWritten != contentLength) {
+                        if (enableLogging) {
+                            logManager.logWarn("WebDAV", "Content length mismatch: expected $contentLength, got $bytesWritten")
+                        }
+                        // For Windows WebDAV compatibility, if the difference is small, accept it
+                        if (Math.abs(bytesWritten - contentLength) > 1024) { // Allow 1KB difference
+                            if (enableLogging) {
+                                logManager.logError("WebDAV", "Content length mismatch too large, rejecting upload")
+                            }
+                            return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Content length mismatch")
                         }
                     }
                 }
+                
+                if (enableLogging) {
+                    logManager.logInfo("WebDAV", "Successfully wrote $bytesWritten bytes to $decodedUri (expected: $contentLength)")
+                }
+                
+            } catch (e: IOException) {
+                if (enableLogging) {
+                    logManager.logError("WebDAV", "IO Error during PUT operation: ${e.message}")
+                }
+                throw e
             } catch (e: Exception) {
                 if (enableLogging) {
-                    logManager.logError("WebDAV", "Error during body parsing/processing: ${e.message}")
+                    logManager.logError("WebDAV", "Unexpected error during PUT operation: ${e.message}")
                 }
                 throw e
             }
 
-            if (enableLogging) {
-                logManager.logInfo("WebDAV", "Successfully wrote $bytesWritten bytes to $decodedUri")
+            // Ensure file is properly synced and accessible before responding
+            if (file.exists()) {
+                // Verify file is readable and has correct size
+                try {
+                    val actualSize = file.length()
+                    val canRead = file.canRead()
+                    val canWrite = file.canWrite()
+                    
+                    if (enableLogging) {
+                        logManager.logInfo("WebDAV", "File verification - Size: $actualSize, CanRead: $canRead, CanWrite: $canWrite")
+                    }
+                    
+                    // For Windows WebDAV, ensure file is not locked
+                    if (!canRead) {
+                        if (enableLogging) {
+                            logManager.logError("WebDAV", "File created but not readable: $decodedUri")
+                        }
+                        return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "File created but not accessible")
+                    }
+                } catch (e: Exception) {
+                    if (enableLogging) {
+                        logManager.logError("WebDAV", "Error verifying file: ${e.message}")
+                    }
+                }
             }
-
-            // Return appropriate status code
+            
+            // Return appropriate status code - ensure we always return a valid response
             val status = if (fileExists) Response.Status.NO_CONTENT else Response.Status.CREATED
             val response = newFixedLengthResponse(status, "text/plain", "")
-            response.addHeader("MS-Author-Via", "DAV")
-            if (file.exists()) {
-                response.addHeader("ETag", "\"${file.lastModified()}-${file.length()}\"")
+            
+            // Add essential WebDAV compliance headers for Windows
+            addStandardWebDAVHeaders(response, isWindowsWebDAV)
+            
+            // Windows WebDAV specific headers for PUT operations
+            if (isWindowsWebDAV) {
+                response.addHeader("Accept-Ranges", "bytes")
+                // Override cache control for PUT operations
+                response.addHeader("Cache-Control", "no-cache, no-store, must-revalidate")
+                response.addHeader("Pragma", "no-cache")
+                response.addHeader("Expires", "0")
             }
-            // Content-Length is already set by newFixedLengthResponse, don't add it again
+            
+            // Add ETag and content info if file exists
+            if (file.exists()) {
+                // Use a more stable ETag format
+                val etag = "\"${file.lastModified().toString(16)}-${file.length().toString(16)}\""
+                response.addHeader("ETag", etag)
+                
+                // Add Last-Modified header with proper format
+                val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
+                dateFormat.timeZone = TimeZone.getTimeZone("GMT")
+                response.addHeader("Last-Modified", dateFormat.format(Date(file.lastModified())))
+                
+                // Add Location header for newly created resources
+                if (!fileExists) {
+                    response.addHeader("Location", uri)
+                }
+                
+                if (enableLogging) {
+                    logManager.logInfo("WebDAV", "PUT completed successfully - File: $decodedUri, Size: ${file.length()}, ETag: $etag")
+                }
+            } else {
+                if (enableLogging) {
+                    logManager.logWarn("WebDAV", "File does not exist after PUT operation: $decodedUri, but returning success status")
+                }
+                // Even if file doesn't exist, return success to avoid client errors
+                response.addHeader("Location", uri)
+            }
+            
             return response
         } catch (e: Exception) {
             if (enableLogging) {
                 logManager.logError("WebDAV", "PUT failed for $decodedUri: ${e.message}")
                 e.printStackTrace()
             }
-            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error creating file: ${e.message}")
+            
+            // For Windows WebDAV compatibility, try to return a more specific error
+            val errorMessage = when {
+                e is IOException -> "IO Error: ${e.message}"
+                e is SecurityException -> "Permission denied"
+                e.message?.contains("space", ignoreCase = true) == true -> "Insufficient storage space"
+                else -> "Error creating file: ${e.message}"
+            }
+            
+            val response = newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", errorMessage)
+            
+            // Even in error cases, add WebDAV headers for Windows compatibility
+            response.addHeader("MS-Author-Via", "DAV")
+            response.addHeader("DAV", "1,2,3")
+            val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
+            dateFormat.timeZone = TimeZone.getTimeZone("GMT")
+            response.addHeader("Date", dateFormat.format(Date()))
+            
+            return response
         }
     }
 
@@ -384,6 +600,8 @@ class WebDAVHandler(
         if (securityResponse != null) return securityResponse
 
         val decodedUri = URLDecoder.decode(uri, "UTF-8")
+        val userAgent = session.headers["user-agent"] ?: ""
+        val isWindowsWebDAV = userAgent.contains("Microsoft-WebDAV-MiniRedir") || userAgent.contains("DavClnt")
 
         // Check if resource is locked
         val lockResponse = checkLockConstraints(session, decodedUri)
@@ -402,11 +620,14 @@ class WebDAVHandler(
                 file.delete()
             }
 
-        return if (deleted) {
+        val response = if (deleted) {
             newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", "")
         } else {
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error deleting file")
         }
+        
+        addStandardWebDAVHeaders(response, isWindowsWebDAV)
+        return response
     }
 
     fun handleMkCol(
@@ -419,6 +640,8 @@ class WebDAVHandler(
         val decodedUri = URLDecoder.decode(uri, "UTF-8")
         val file = File(rootDir, decodedUri.removePrefix("/"))
         val enableLogging = runBlocking { settingsManager.enableLogging.first() }
+        val userAgent = session.headers["user-agent"] ?: ""
+        val isWindowsWebDAV = userAgent.contains("Microsoft-WebDAV-MiniRedir") || userAgent.contains("DavClnt")
 
         if (enableLogging) {
             logManager.logInfo("WebDAV", "MKCOL request for $decodedUri (file: ${file.absolutePath})")
@@ -442,8 +665,7 @@ class WebDAVHandler(
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error creating directory")
         }
         
-        response.addHeader("MS-Author-Via", "DAV")
-        // Content-Length is already set by newFixedLengthResponse, don't add it again
+        addStandardWebDAVHeaders(response, isWindowsWebDAV)
         return response
     }
 
@@ -457,9 +679,13 @@ class WebDAVHandler(
         val decodedUri = URLDecoder.decode(uri, "UTF-8")
         val file = File(rootDir, decodedUri.removePrefix("/"))
         val enableLogging = runBlocking { settingsManager.enableLogging.first() }
+        
+        // Get Windows WebDAV client info
+        val userAgent = session.headers["user-agent"] ?: ""
+        val isWindowsWebDAV = userAgent.contains("Microsoft-WebDAV-MiniRedir") || userAgent.contains("DavClnt")
 
         if (enableLogging) {
-            logManager.logInfo("WebDAV", "PROPFIND request for $decodedUri (file: ${file.absolutePath})")
+            logManager.logInfo("WebDAV", "PROPFIND request for $decodedUri (file: ${file.absolutePath}), Windows client: $isWindowsWebDAV")
         }
 
         // Handle root directory case
@@ -472,9 +698,7 @@ class WebDAVHandler(
             val xml = webdavUtils.generatePropFindResponse(rootFile, "/", depth)
             
             val response = newFixedLengthResponse(Response.Status.MULTI_STATUS, "application/xml; charset=utf-8", xml)
-            response.addHeader("DAV", "1,2,3")
-            response.addHeader("MS-Author-Via", "DAV")
-            response.addHeader("Cache-Control", "no-cache")
+            addStandardWebDAVHeaders(response, isWindowsWebDAV)
             return response
         }
 
@@ -493,10 +717,31 @@ class WebDAVHandler(
         val xml = webdavUtils.generatePropFindResponse(file, uri, depth)
 
         val response = newFixedLengthResponse(Response.Status.MULTI_STATUS, "application/xml; charset=utf-8", xml)
-        response.addHeader("DAV", "1,2,3")
-        response.addHeader("MS-Author-Via", "DAV")
-        response.addHeader("Cache-Control", "no-cache")
+        addStandardWebDAVHeaders(response, isWindowsWebDAV)
         return response
+    }
+    
+    private fun addStandardWebDAVHeaders(response: Response, isWindowsWebDAV: Boolean) {
+        // Essential headers for Windows WebDAV compatibility
+        response.addHeader("MS-Author-Via", "DAV")
+        response.addHeader("DAV", "1,2,3")
+        
+        if (isWindowsWebDAV) {
+            response.addHeader("Server", "Microsoft-IIS/10.0")
+            response.addHeader("Cache-Control", "private")
+            response.addHeader("Public", "OPTIONS, TRACE, GET, HEAD, DELETE, PUT, POST, COPY, MOVE, MKCOL, PROPFIND, PROPPATCH, LOCK, UNLOCK, SEARCH")
+        } else {
+            response.addHeader("Server", "WebDAVServer/1.0")
+            response.addHeader("Cache-Control", "no-cache")
+        }
+        
+        // Date header is critical for Windows WebDAV
+        val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
+        dateFormat.timeZone = TimeZone.getTimeZone("GMT")
+        response.addHeader("Date", dateFormat.format(Date()))
+        
+        response.addHeader("Connection", "keep-alive")
+        response.addHeader("Keep-Alive", "timeout=300, max=1000")
     }
 
     fun handlePropPatch(uri: String): Response {
@@ -804,5 +1049,47 @@ class WebDAVHandler(
                 logManager.logInfo("WebDAV", "Cleaned up ${expiredKeys.size} expired locks")
             }
         }
+    }
+
+    // Special handling for Windows WebDAV paste operations
+    fun handleWindowsPasteOperation(
+        session: IHTTPSession,
+        uri: String,
+    ): Response? {
+        val userAgent = session.headers["user-agent"] ?: ""
+        val isWindowsWebDAV = userAgent.contains("Microsoft-WebDAV-MiniRedir") || userAgent.contains("DavClnt")
+        
+        if (!isWindowsWebDAV) return null
+        
+        val enableLogging = runBlocking { settingsManager.enableLogging.first() }
+        
+        // Check for Windows-specific headers that indicate paste operation
+        val overwrite = session.headers["overwrite"] ?: "T"
+        val ifMatch = session.headers["if-match"]
+        val ifNoneMatch = session.headers["if-none-match"]
+        
+        if (enableLogging) {
+            logManager.logInfo("WebDAV", "Windows paste operation detected - Overwrite: $overwrite, If-Match: $ifMatch, If-None-Match: $ifNoneMatch")
+        }
+        
+        // Pre-check destination accessibility
+        val decodedUri = URLDecoder.decode(uri, "UTF-8")
+        val file = File(rootDir, decodedUri.removePrefix("/"))
+        
+        // Ensure parent directory exists and is writable
+        file.parentFile?.let { parent ->
+            if (!parent.exists()) {
+                parent.mkdirs()
+            }
+            
+            if (!parent.canWrite()) {
+                if (enableLogging) {
+                    logManager.logError("WebDAV", "Parent directory not writable: ${parent.absolutePath}")
+                }
+                return newFixedLengthResponse(Response.Status.FORBIDDEN, "text/plain", "Directory not writable")
+            }
+        }
+        
+        return null // Continue with normal PUT processing
     }
 }

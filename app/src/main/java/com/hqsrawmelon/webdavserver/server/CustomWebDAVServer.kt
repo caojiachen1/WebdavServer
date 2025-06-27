@@ -86,8 +86,24 @@ class CustomWebDAVServer(
         } catch (e: Exception) {
             if (enableLogging) {
                 logManager.logError("Server", "Error processing request from $clientIP: ${e.message}")
+                e.printStackTrace()
             }
-            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Internal server error")
+            
+            // Create a proper error response with WebDAV headers
+            val response = newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Internal server error: ${e.message}")
+            
+            // Add essential WebDAV headers even for errors
+            response.addHeader("MS-Author-Via", "DAV")
+            response.addHeader("DAV", "1,2,3")
+            response.addHeader("Server", "WebDAVServer/1.0")
+            response.addHeader("Connection", "close") // Close connection on error
+            
+            // Add date header
+            val dateFormat = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", java.util.Locale.US)
+            dateFormat.timeZone = java.util.TimeZone.getTimeZone("GMT")
+            response.addHeader("Date", dateFormat.format(java.util.Date()))
+            
+            return response
         }
     }
 
